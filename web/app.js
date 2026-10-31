@@ -280,6 +280,7 @@ $("recMore").addEventListener("click", () => {
 
 const ICONS = {
   play: '<svg viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5-12-7.5Z"/></svg>',
+  link: '<svg viewBox="0 0 24 24"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3.2-3.2a4.5 4.5 0 0 0-6.4-6.4L12 5.6"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3.2 3.2a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/></svg>',
   download: '<svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
 };
@@ -318,13 +319,36 @@ function renderRecording(rec) {
   const actions = document.createElement("div");
   actions.className = "rec-actions";
   const play = iconButton("play", "Ver", () => openPlayer(rec, url));
+  const link = iconButton("link", "Copiar link", () => copyLink(new URL(url, location.href).href));
   const dl = iconButton("download", "Descarregar", () => { location.href = url + "?download=1"; });
   const del = iconButton("trash", "Apagar", () => confirmDelete(rec), "del");
-  for (const b of [play, dl, del]) b.disabled = !!rec.processing;
-  actions.append(play, dl, del);
+  for (const b of [play, link, dl, del]) b.disabled = !!rec.processing;
+  actions.append(play, link, dl, del);
 
   li.append(info, actions);
   return li;
+}
+
+// navigator.clipboard only exists in a secure context (https or localhost), so
+// opening the page by LAN IP over http falls back to execCommand, then prompt.
+async function copyLink(href) {
+  try {
+    await navigator.clipboard.writeText(href);
+    toast("Link copiado");
+    return;
+  } catch { /* not available here */ }
+  const ta = document.createElement("textarea");
+  ta.value = href;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.append(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch { /* unsupported */ }
+  ta.remove();
+  if (ok) toast("Link copiado");
+  else prompt("Copie o link:", href);
 }
 
 function openPlayer(rec, url) {
