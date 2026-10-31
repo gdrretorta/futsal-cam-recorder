@@ -164,8 +164,9 @@ func (a *auth) succeed(ip string) {
 }
 
 var (
-	errLoginRequired = errors.New("é preciso iniciar sessão")
-	errForbidden     = errors.New("não tem permissão para isto")
+	errLoginRequired      = errors.New("é preciso iniciar sessão")
+	errForbidden          = errors.New("não tem permissão para isto")
+	errMustChangePassword = errors.New("tem de mudar a palavra-passe antes de continuar")
 )
 
 // access is what an endpoint needs.
@@ -180,11 +181,15 @@ const (
 	accessUsers
 	// accessAdmin: admins only.
 	accessAdmin
+	// accessAccount: any logged-in user, even one who must still change the
+	// password someone else chose (see User.MustChangePassword). Only for
+	// changing that password.
+	accessAccount
 )
 
 func allowed(role config.Role, level access) bool {
 	switch level {
-	case accessRecorder:
+	case accessRecorder, accessAccount:
 		return true
 	case accessUsers:
 		return role.CanManageUsers()
@@ -205,6 +210,8 @@ func (s *Server) require(level access, h http.HandlerFunc) http.HandlerFunc {
 			h(w, r)
 		case !ok:
 			writeError(w, http.StatusUnauthorized, errLoginRequired)
+		case u.MustChangePassword && level != accessAccount:
+			writeError(w, http.StatusForbidden, errMustChangePassword)
 		case !allowed(u.Role, level):
 			writeError(w, http.StatusForbidden, errForbidden)
 		default:
@@ -220,12 +227,13 @@ func userFrom(r *http.Request) (config.User, bool) {
 
 // userDTO is a user as the API shows it: never the password hash.
 type userDTO struct {
-	ID    string      `json:"id"`
-	Email string      `json:"email"`
-	Role  config.Role `json:"role"`
+	ID                 string      `json:"id"`
+	Email              string      `json:"email"`
+	Role               config.Role `json:"role"`
+	MustChangePassword bool        `json:"mustChangePassword"`
 }
 
-func toUserDTO(u config.User) userDTO { return userDTO{u.ID, u.Email, u.Role} }
+func toUserDTO(u config.User) userDTO { return userDTO{u.ID, u.Email, u.Role, u.MustChangePassword} }
 
 type meDTO struct {
 	// AuthRequired is false while there are no users: the recorder is open.
@@ -298,6 +306,10 @@ func (s *Server) changeOwnPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if !config.CheckPassword(u.PasswordHash, body.CurrentPassword) {
 		writeError(w, http.StatusBadRequest, errors.New("a palavra-passe atual está errada"))
+		return
+	}
+	if body.Password == body.CurrentPassword {
+		writeError(w, http.StatusBadRequest, errors.New("a nova palavra-passe tem de ser diferente da atual"))
 		return
 	}
 	updated, err := s.Store.UpdateUser(u.ID, config.UserChanges{Password: &body.Password}, nil)

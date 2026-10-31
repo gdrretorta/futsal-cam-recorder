@@ -15,18 +15,21 @@ type errPermission struct{ msg string }
 func (e errPermission) Error() string { return e.msg }
 
 var (
-	errAdminsOnly = errPermission{"só um administrador pode criar ou alterar administradores"}
+	errAdminsOnly = errPermission{"só um administrador pode criar ou alterar administradores e gestores de utilizadores"}
 	errDeleteSelf = errPermission{"não pode apagar a sua própria conta"}
 )
 
 // canManage applies the rules of the users page: admins manage everyone, user
-// managers only users and user managers, so nobody can make themselves admin.
+// managers only plain users (roles holds the role before and after a change),
+// so nobody can give anyone, themselves included, more power than a user.
 func canManage(actor config.User, roles ...config.Role) error {
 	if actor.Role == config.RoleAdmin {
 		return nil
 	}
-	if slices.Contains(roles, config.RoleAdmin) {
-		return errAdminsOnly
+	for _, r := range roles {
+		if r != config.RoleUser {
+			return errAdminsOnly
+		}
 	}
 	return nil
 }
@@ -68,11 +71,17 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &body) {
 		return
 	}
-	if err := canManage(actor, body.Role); err != nil {
+	role, err := config.ParseRole(string(body.Role))
+	if err != nil {
 		writeUserError(w, err)
 		return
 	}
-	u, err := s.Store.AddUser(body.Email, body.Role, body.Password)
+	if err := canManage(actor, role); err != nil {
+		writeUserError(w, err)
+		return
+	}
+	// The creator chose the password: the new user must pick their own.
+	u, err := s.Store.AddUser(body.Email, role, body.Password, true)
 	if err != nil {
 		writeUserError(w, err)
 		return
@@ -94,7 +103,10 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 	if body.Password != nil && *body.Password == "" {
 		body.Password = nil
 	}
-	u, err := s.Store.UpdateUser(r.PathValue("id"), config.UserChanges{Email: body.Email, Role: body.Role, Password: body.Password},
+	// A password reset by someone else must be changed at the next login.
+	id := r.PathValue("id")
+	ch := config.UserChanges{Email: body.Email, Role: body.Role, Password: body.Password, MustChangePassword: id != actor.ID}
+	u, err := s.Store.UpdateUser(id, ch,
 		func(before, after config.User) error { return canManage(actor, before.Role, after.Role) })
 	if err != nil {
 		writeUserError(w, err)

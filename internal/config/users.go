@@ -40,6 +40,10 @@ type User struct {
 	Email        string `json:"email"`
 	Role         Role   `json:"role"`
 	PasswordHash string `json:"passwordHash"`
+	// MustChangePassword is set when someone else chose the password (new
+	// user, password reset): until the user picks their own, they can only
+	// change it.
+	MustChangePassword bool `json:"mustChangePassword,omitempty"`
 }
 
 // MigratedAdminEmail is the email given to the admin created from the single
@@ -164,8 +168,9 @@ func (s *Store) Authenticate(email, password string) (User, error) {
 	return users[i], nil
 }
 
-// AddUser creates a user.
-func (s *Store) AddUser(email string, role Role, password string) (User, error) {
+// AddUser creates a user. mustChange makes them pick a new password at the
+// first login (see User.MustChangePassword).
+func (s *Store) AddUser(email string, role Role, password string, mustChange bool) (User, error) {
 	email, err := NormalizeEmail(email)
 	if err != nil {
 		return User{}, err
@@ -177,7 +182,7 @@ func (s *Store) AddUser(email string, role Role, password string) (User, error) 
 	if err != nil {
 		return User{}, err
 	}
-	u := User{ID: newUserID(), Email: email, Role: role, PasswordHash: hash}
+	u := User{ID: newUserID(), Email: email, Role: role, PasswordHash: hash, MustChangePassword: mustChange}
 	return u, s.Edit(func(c *Config) error {
 		if findUser(c.Users, func(x User) bool { return x.Email == email }) >= 0 {
 			return ErrEmailTaken
@@ -195,6 +200,8 @@ type UserChanges struct {
 	Email    *string
 	Role     *Role
 	Password *string
+	// MustChangePassword is only applied together with Password.
+	MustChangePassword bool
 }
 
 // UpdateUser changes a user. check, when not nil, sees the user before and
@@ -240,6 +247,7 @@ func (s *Store) UpdateUser(id string, ch UserChanges, check func(before, after U
 		}
 		if hash != "" {
 			after.PasswordHash = hash
+			after.MustChangePassword = ch.MustChangePassword
 		}
 		if check != nil {
 			if err := check(before, after); err != nil {
@@ -288,7 +296,7 @@ func (s *Store) SetUser(email string, role Role, password string) (User, error) 
 	if i := findUser(users, func(u User) bool { return u.Email == norm }); i >= 0 {
 		return s.UpdateUser(users[i].ID, UserChanges{Role: &role, Password: &password}, nil)
 	}
-	return s.AddUser(norm, role, password)
+	return s.AddUser(norm, role, password, false)
 }
 
 // SetAdminPassword sets the password of the first admin (used by the

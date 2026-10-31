@@ -5,7 +5,7 @@ A single executable that runs as a Windows service and **updates itself** from G
 
 - One-click record and stop, with a live camera preview and a timer
 - Recordings list with an in-browser player, download and delete
-- Login with email and password, with three roles: **Admin** (everything), **UserManager** (recorder and users) and **User** (recorder only)
+- Login with email and password, with three roles: **Admin** (everything), **UserManager** (recorder and plain users) and **User** (recorder only). A password set by someone else must be changed at the first login
 - A recording's link can be copied and shared: it plays without logging in
 - Camera settings in the UI, with a "test connection" button (admins only)
 - Recordings survive power cuts: files are fragmented MP4 while recording and finalized when stopped

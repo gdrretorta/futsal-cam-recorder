@@ -43,10 +43,10 @@ func TestUsersCRUD(t *testing.T) {
 	if s.HasUsers() {
 		t.Fatal("new install has users")
 	}
-	if _, err := s.AddUser("u@x.pt", RoleUser, "password1"); err == nil {
+	if _, err := s.AddUser("u@x.pt", RoleUser, "password1", false); err == nil {
 		t.Fatal("first user must be an admin")
 	}
-	admin, err := s.AddUser("Admin@X.pt", RoleAdmin, "password1")
+	admin, err := s.AddUser("Admin@X.pt", RoleAdmin, "password1", false)
 	if err != nil || admin.Email != "admin@x.pt" {
 		t.Fatalf("add admin = %+v %v", admin, err)
 	}
@@ -61,11 +61,11 @@ func TestUsersCRUD(t *testing.T) {
 		{"n@x.pt", "short", RoleUser, ErrWeakPassword},
 		{"n@x.pt", "password1", "boss", ErrInvalidRole},
 	} {
-		if _, err := s.AddUser(c.email, c.role, c.pw); !errors.Is(err, c.want) {
+		if _, err := s.AddUser(c.email, c.role, c.pw, false); !errors.Is(err, c.want) {
 			t.Errorf("AddUser(%q, %q) = %v, want %v", c.email, c.role, err, c.want)
 		}
 	}
-	user, err := s.AddUser("u@x.pt", RoleUser, "password1")
+	user, err := s.AddUser("u@x.pt", RoleUser, "password1", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestSetUserAndAdminPassword(t *testing.T) {
 // Get hands out copies: changing one must not change the store.
 func TestGetCopiesUsers(t *testing.T) {
 	s, _ := Open(t.TempDir())
-	s.AddUser("a@x.pt", RoleAdmin, "password1")
+	s.AddUser("a@x.pt", RoleAdmin, "password1", false)
 	cfg := s.Get()
 	cfg.Users[0].Role = RoleUser
 	if s.Get().Users[0].Role != RoleAdmin {

@@ -2,7 +2,9 @@
 //
 // Access: [user] any logged-in user, [users] admins and user managers,
 // [admin] admins only. While no user exists, [user] endpoints are open to
-// everyone (see accessRecorder). /recordings/{name} is always public, so a
+// everyone (see accessRecorder). A user whose password was chosen by someone
+// else can only use /api/me, /api/me/password and /api/logout until they
+// change it (403 otherwise). /recordings/{name} is always public, so a
 // recording's link can be shared.
 //
 //	GET    /api/status               recorder, update and disk status; only
@@ -16,7 +18,7 @@
 //	GET    /api/me                   {authRequired, user}; renews the session
 //	POST   /api/login                {email, password} → session cookie
 //	POST   /api/logout               end the session
-//	PUT    /api/me/password          {currentPassword, password}              [user]
+//	PUT    /api/me/password          {currentPassword, password}              [account]
 //	GET    /api/users                list users                               [users]
 //	POST   /api/users                {email, role, password} create a user    [users]
 //	PUT    /api/users/{id}           {email?, role?, password?} change a user [users]
@@ -86,7 +88,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/me", s.me)
 	mux.HandleFunc("POST /api/login", s.login)
 	mux.HandleFunc("POST /api/logout", s.logout)
-	mux.HandleFunc("PUT /api/me/password", user(s.changeOwnPassword))
+	mux.HandleFunc("PUT /api/me/password", s.require(accessAccount, s.changeOwnPassword))
 	mux.HandleFunc("GET /api/users", users(s.listUsers))
 	mux.HandleFunc("POST /api/users", users(s.createUser))
 	mux.HandleFunc("PUT /api/users/{id}", users(s.updateUser))
@@ -110,7 +112,7 @@ type disk struct {
 // access it reveals nothing but the title and version.
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Store.Get()
-	if _, ok := s.auth.user(r, s.Store); !ok && len(cfg.Users) > 0 {
+	if u, ok := s.auth.user(r, s.Store); (!ok || u.MustChangePassword) && len(cfg.Users) > 0 {
 		writeJSON(w, http.StatusOK, map[string]any{"title": cfg.Title, "version": s.Version, "loginRequired": true})
 		return
 	}

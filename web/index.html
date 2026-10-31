@@ -38,6 +38,19 @@
     </form>
   </main>
 
+  <main id="passwordView" class="login-view" hidden>
+    <form id="passwordForm" class="card login-card">
+      <h2>Escolha a sua palavra-passe</h2>
+      <p class="muted">A palavra-passe com que entrou foi definida por outra pessoa. Escolha uma nova para continuar.</p>
+      <label id="tempPasswordLabel">Palavra-passe atual<input name="currentPassword" type="password" autocomplete="current-password"></label>
+      <label>Nova palavra-passe (mínimo 8 caracteres)<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+      <label>Repita a nova palavra-passe<input name="confirm" type="password" autocomplete="new-password" minlength="8" required></label>
+      <p id="passwordError" class="state-error" hidden></p>
+      <button type="submit" class="btn primary">Guardar e continuar</button>
+      <button type="button" id="passwordLogoutBtn" class="link-btn">Terminar sessão</button>
+    </form>
+  </main>
+
   <main id="app" class="layout">
     <section class="card camera">
       <div class="preview">
@@ -173,6 +186,7 @@
         <label>Email<input name="email" type="email" autocomplete="off" required></label>
         <label>Perfil<select name="role"></select></label>
         <label><span id="userPasswordLabel"></span><input name="password" type="password" autocomplete="new-password" minlength="8"></label>
+        <p id="userPasswordHint" class="muted hint">Envie a palavra-passe à pessoa. No primeiro login vai ter de escolher uma nova.</p>
       </fieldset>
       <p id="userError" class="state-error" hidden></p>
       <div class="dlg-actions">

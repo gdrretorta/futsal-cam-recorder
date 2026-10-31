@@ -55,7 +55,8 @@ async function api(method, url, body) {
 }
 
 function toast(msg, isError = false) {
-  if (isError && !$("loginView").hidden) return; // requests cut short by a logout
+  // Requests cut short by a logout, or refused until the password is changed.
+  if (isError && !($("loginView").hidden && $("passwordView").hidden)) return;
   const el = $("toast");
   el.textContent = msg;
   el.classList.toggle("error", isError);
@@ -113,7 +114,7 @@ async function refreshStatus() {
     return;
   }
   if (s.loginRequired) {
-    if ($("loginView").hidden) loadMe();
+    if ($("loginView").hidden && $("passwordView").hidden) loadMe();
     return;
   }
   status = s;
@@ -484,24 +485,33 @@ async function loadMe() {
   applyAccess();
 }
 
-// applyAccess shows the login page or the recorder, with the buttons the
+// applyAccess shows the login page, the "choose your password" page (when
+// someone else set the password) or the recorder, with the buttons the
 // user's role allows. While there are no users the recorder is open to all.
 function applyAccess() {
   const loggedOut = me.authRequired && !me.user;
-  const wasLoggedOut = !$("loginView").hidden;
+  const mustChange = !!(me.user && me.user.mustChangePassword);
+  const wasMustChange = !$("passwordView").hidden;
+  const wasLoggedOut = !$("loginView").hidden || wasMustChange;
   $("loginView").hidden = !loggedOut;
-  for (const id of ["app", "topbarActions"]) $(id).hidden = loggedOut;
-  document.querySelector("body > footer").hidden = loggedOut;
+  $("passwordView").hidden = !mustChange;
+  for (const id of ["app", "topbarActions"]) $(id).hidden = loggedOut || mustChange;
+  document.querySelector("body > footer").hidden = loggedOut || mustChange;
+  if (mustChange) {
+    if (wasMustChange) return; // don't wipe what is being typed
+    clearRecorder();
+    // Just logged in: the current password is known, don't ask again.
+    passwordForm.reset();
+    passwordForm.elements.currentPassword.value = loginPassword;
+    passwordForm.elements.currentPassword.required = !loginPassword;
+    $("tempPasswordLabel").hidden = !!loginPassword;
+    $("passwordError").hidden = true;
+    passwordForm.elements[loginPassword ? "password" : "currentPassword"].focus();
+    return;
+  }
+  loginPassword = "";
   if (loggedOut) {
-    document.querySelectorAll("dialog[open]").forEach((d) => d.close());
-    // Nothing of the recorder stays on screen after logging out.
-    status = null;
-    recordings = [];
-    listKey = "";
-    $("recList").replaceChildren();
-    $("preview").hidden = true;
-    $("preview").removeAttribute("src");
-    if (!wasLoggedOut) loginForm.reset();
+    clearRecorder();
     loginForm.elements.email.focus();
     return;
   }
@@ -513,6 +523,42 @@ function applyAccess() {
   if (wasLoggedOut) refreshStatus().then(refreshSnapshot);
 }
 
+// Nothing of the recorder stays on screen after logging out.
+function clearRecorder() {
+  document.querySelectorAll("dialog[open]").forEach((d) => d.close());
+  status = null;
+  recordings = [];
+  listKey = "";
+  $("recList").replaceChildren();
+  $("preview").hidden = true;
+  $("preview").removeAttribute("src");
+}
+
+let loginPassword = ""; // kept only until the forced password change
+
+const passwordForm = $("passwordForm");
+
+passwordForm.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = passwordForm.elements;
+  const err = $("passwordError");
+  err.hidden = true;
+  if (f.password.value !== f.confirm.value) {
+    err.textContent = "As palavras-passe não coincidem.";
+    err.hidden = false;
+    return;
+  }
+  try {
+    await api("PUT", "/api/me/password", { currentPassword: f.currentPassword.value, password: f.password.value });
+    loginPassword = "";
+    toast("Palavra-passe guardada");
+    await loadMe();
+  } catch (e) {
+    err.textContent = e.message;
+    err.hidden = false;
+  }
+});
+
 const loginForm = $("loginForm");
 
 loginForm.addEventListener("submit", async (ev) => {
@@ -523,6 +569,8 @@ loginForm.addEventListener("submit", async (ev) => {
       email: loginForm.elements.email.value.trim(),
       password: loginForm.elements.password.value,
     });
+    if (me.user.mustChangePassword) loginPassword = loginForm.elements.password.value;
+    loginForm.reset();
     applyAccess();
   } catch (e) {
     $("loginError").textContent = e.message;
@@ -556,12 +604,15 @@ accountForm.addEventListener("submit", async (ev) => {
   }
 });
 
-$("logoutBtn").addEventListener("click", async () => {
+async function logout() {
   try {
     await api("POST", "/api/logout");
   } catch { /* the cookie is cleared either way */ }
+  loginPassword = "";
   loadMe();
-});
+}
+$("logoutBtn").addEventListener("click", logout);
+$("passwordLogoutBtn").addEventListener("click", logout);
 
 // ---------- Users ----------
 
@@ -587,11 +638,12 @@ function renderUser(u) {
   name.textContent = u.email;
   const meta = document.createElement("div");
   meta.className = "muted";
-  meta.textContent = (ROLES[u.role] || u.role) + (u.id === me.user.id ? " · a sua conta" : "");
+  meta.textContent = (ROLES[u.role] || u.role) + (u.id === me.user.id ? " · a sua conta" : "") +
+    (u.mustChangePassword ? " · ainda não escolheu a palavra-passe" : "");
   info.append(name, meta);
 
-  // User managers can't touch admins (the server refuses it too).
-  const locked = u.role === "admin" && role() !== "admin";
+  // User managers only manage plain users (the server refuses the rest too).
+  const locked = role() !== "admin" && u.role !== "user";
   const actions = document.createElement("div");
   actions.className = "rec-actions";
   const edit = iconButton("edit", "Editar", () => openUserForm(u));
@@ -606,7 +658,7 @@ function renderUser(u) {
   }), "del");
   edit.disabled = locked;
   del.disabled = locked || u.id === me.user.id;
-  if (locked) edit.title = del.title = "Só um administrador pode alterar administradores";
+  if (locked) edit.title = del.title = "Só um administrador pode alterar administradores e gestores de utilizadores";
   actions.append(edit, del);
   li.append(info, actions);
   return li;
@@ -619,13 +671,16 @@ function openUserForm(u) {
   editingUser = u;
   userForm.reset();
   const select = userForm.elements.role;
-  const roles = role() === "admin" ? ["user", "userManager", "admin"] : ["user", "userManager"];
+  const roles = role() === "admin" ? ["user", "userManager", "admin"] : ["user"];
   select.replaceChildren(...roles.map((r) => new Option(ROLES[r], r)));
   select.value = u ? u.role : "user";
+  select.disabled = roles.length === 1;
   userForm.elements.email.value = u ? u.email : "";
   userForm.elements.password.required = !u;
+  const self = u && u.id === me.user.id;
   userForm.elements.password.placeholder = u ? "Deixe vazio para manter" : "";
-  $("userPasswordLabel").textContent = u ? "Nova palavra-passe" : "Palavra-passe (mínimo 8 caracteres)";
+  $("userPasswordLabel").textContent = u ? "Nova palavra-passe" : "Palavra-passe temporária (mínimo 8 caracteres)";
+  $("userPasswordHint").hidden = self;
   $("userDlgTitle").textContent = u ? "Editar utilizador" : "Novo utilizador";
   $("userError").hidden = true;
   $("userDlg").showModal();
@@ -642,7 +697,9 @@ userForm.addEventListener("submit", async (ev) => {
     if (editingUser) await api("PUT", `/api/users/${encodeURIComponent(editingUser.id)}`, body);
     else await api("POST", "/api/users", body);
     $("userDlg").close();
-    toast(editingUser ? "Utilizador guardado" : "Utilizador criado");
+    const reset = !editingUser || (body.password && editingUser.id !== me.user.id);
+    toast((editingUser ? "Utilizador guardado" : "Utilizador criado") +
+      (reset ? ". Vai ter de escolher uma palavra-passe nova ao entrar." : ""), false);
     // Editing yourself can change what you may see.
     if (editingUser && editingUser.id === me.user.id) await loadMe();
     if (role() === "admin" || role() === "userManager") openUsers();

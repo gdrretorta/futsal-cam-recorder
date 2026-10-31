@@ -153,8 +153,11 @@ h3 { font-size: 1rem; }
 .login-card { width: min(360px, 100%); display: flex; flex-direction: column; gap: 12px; padding: 24px; }
 .login-card .btn { margin-top: 4px; }
 .login-card .state-error { margin: 0; }
+.login-card p.muted { margin: 0; }
+.login-card .link-btn { align-self: center; }
 
 /* Users */
+.hint { margin: -4px 0 0; }
 .role { font-size: .75rem; font-weight: 600; color: var(--muted); margin-left: 6px; }
 .role.admin { color: var(--accent); }
 

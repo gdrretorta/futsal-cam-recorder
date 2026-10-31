@@ -32,7 +32,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *config.Store) {
 	if err := store.Update(cfg); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.AddUser(adminEmail, config.RoleAdmin, adminPassword); err != nil {
+	if _, err := store.AddUser(adminEmail, config.RoleAdmin, adminPassword, false); err != nil {
 		t.Fatal(err)
 	}
 	log := logging.Discard()
@@ -211,7 +211,7 @@ func TestStatusAndStatic(t *testing.T) {
 // addUser creates a user directly in the store and logs it in.
 func addUser(t *testing.T, srv *httptest.Server, store *config.Store, email string, role config.Role) (config.User, *http.Client) {
 	t.Helper()
-	u, err := store.AddUser(email, role, "password "+email)
+	u, err := store.AddUser(email, role, "password "+email, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,11 +287,18 @@ func TestUserManagement(t *testing.T) {
 		t.Fatalf("list = %s", body)
 	}
 
-	// A user manager can't create, promote to, edit or delete admins.
+	// A user manager can't create, promote to, edit or delete admins or user
+	// managers: only plain users.
+	otherMgrUser, _ := addUser(t, srv, store, "other@example.com", config.RoleUserManager)
 	for _, c := range []struct{ method, path, body string }{
 		{"POST", "/api/users", `{"email":"x@example.com","role":"admin","password":"password1"}`},
+		{"POST", "/api/users", `{"email":"x@example.com","role":"userManager","password":"password1"}`},
 		{"PUT", "/api/users/" + plain.ID, `{"role":"admin"}`},
+		{"PUT", "/api/users/" + plain.ID, `{"role":"userManager"}`},
 		{"PUT", "/api/users/" + mgrUser.ID, `{"role":"admin"}`},
+		{"PUT", "/api/users/" + otherMgrUser.ID, `{"password":"hijacked!"}`},
+		{"PUT", "/api/users/" + otherMgrUser.ID, `{"role":"user"}`},
+		{"DELETE", "/api/users/" + otherMgrUser.ID, ``},
 		{"PUT", "/api/users/" + adminUser.ID, `{"password":"hijacked!"}`},
 		{"DELETE", "/api/users/" + adminUser.ID, ``},
 	} {
@@ -302,10 +309,13 @@ func TestUserManagement(t *testing.T) {
 	if _, err := store.Authenticate(adminEmail, adminPassword); err != nil {
 		t.Fatal("admin password changed by a user manager")
 	}
+	if _, err := store.Authenticate("x@example.com", "password1"); err == nil {
+		t.Fatal("user manager created a privileged user")
+	}
 
-	// But can manage users and user managers.
+	// But can manage plain users.
 	resp, body := doWith(t, manager, "POST", srv.URL+"/api/users", `{"email":"New@Example.com","role":"user","password":"password1"}`)
-	if resp.StatusCode != 201 || !strings.Contains(body, `"email":"new@example.com"`) {
+	if resp.StatusCode != 201 || !strings.Contains(body, `"email":"new@example.com"`) || !strings.Contains(body, `"mustChangePassword":true`) {
 		t.Fatalf("create = %d %s", resp.StatusCode, body)
 	}
 	var created userDTO
@@ -323,11 +333,15 @@ func TestUserManagement(t *testing.T) {
 			t.Errorf("create %s = %d %s, want %d", c.body, resp.StatusCode, body, c.want)
 		}
 	}
-	if resp, body := doWith(t, manager, "PUT", srv.URL+"/api/users/"+created.ID, `{"role":"userManager","password":""}`); resp.StatusCode != 200 || !strings.Contains(body, `"role":"userManager"`) {
-		t.Fatalf("promote = %d %s", resp.StatusCode, body)
+	if resp, body := doWith(t, manager, "PUT", srv.URL+"/api/users/"+created.ID, `{"email":"renamed@example.com","password":""}`); resp.StatusCode != 200 || !strings.Contains(body, `"email":"renamed@example.com"`) {
+		t.Fatalf("edit = %d %s", resp.StatusCode, body)
 	}
-	if _, err := store.Authenticate("new@example.com", "password1"); err != nil {
+	if _, err := store.Authenticate("renamed@example.com", "password1"); err != nil {
 		t.Fatal("empty password in update must keep the old one")
+	}
+	// The admin can promote to user manager.
+	if resp, body := doWith(t, admin, "PUT", srv.URL+"/api/users/"+created.ID, `{"role":"userManager"}`); resp.StatusCode != 200 || !strings.Contains(body, `"role":"userManager"`) {
+		t.Fatalf("admin promote = %d %s", resp.StatusCode, body)
 	}
 
 	// Nobody can delete themselves.
@@ -347,10 +361,20 @@ func TestUserManagement(t *testing.T) {
 	if resp, _ := doWith(t, plainClient, "GET", srv.URL+"/api/users", ""); resp.StatusCode != 200 {
 		t.Errorf("after promotion = %d, want 200", resp.StatusCode)
 	}
-	// A password change by someone else logs the user out; a deleted user too.
-	doWith(t, admin, "PUT", srv.URL+"/api/users/"+plain.ID, `{"password":"another password"}`)
+	// A password reset by someone else logs the user out and makes them
+	// change it at the next login; a deleted user is logged out too.
+	if _, body := doWith(t, admin, "PUT", srv.URL+"/api/users/"+plain.ID, `{"password":"another password"}`); !strings.Contains(body, `"mustChangePassword":true`) {
+		t.Errorf("reset by admin = %s, want mustChangePassword", body)
+	}
 	if resp, _ := doWith(t, plainClient, "GET", srv.URL+"/api/recordings", ""); resp.StatusCode != 401 {
 		t.Errorf("after password reset = %d, want 401", resp.StatusCode)
+	}
+	// Setting your own password from the users page doesn't.
+	if _, body := doWith(t, admin, "PUT", srv.URL+"/api/users/"+adminUser.ID, `{"password":"`+adminPassword+`!"}`); !strings.Contains(body, `"mustChangePassword":false`) {
+		t.Errorf("own reset = %s, want no mustChangePassword", body)
+	}
+	if resp, _ := doWith(t, admin, "GET", srv.URL+"/api/settings", ""); resp.StatusCode != 200 {
+		t.Errorf("own session after own reset = %d, want 200", resp.StatusCode)
 	}
 	if resp, _ := doWith(t, admin, "DELETE", srv.URL+"/api/users/"+mgrUser.ID, ""); resp.StatusCode != 204 {
 		t.Fatalf("delete = %d", resp.StatusCode)
@@ -360,6 +384,40 @@ func TestUserManagement(t *testing.T) {
 	}
 	if resp, _ := doWith(t, admin, "DELETE", srv.URL+"/api/users/"+mgrUser.ID, ""); resp.StatusCode != 404 {
 		t.Errorf("delete twice = %d, want 404", resp.StatusCode)
+	}
+}
+
+// A user whose password was chosen by someone else can do nothing but change
+// it, and must pick a different one.
+func TestMustChangePassword(t *testing.T) {
+	srv, _ := newTestServer(t)
+	admin := adminClient(t, srv)
+	if resp, body := doWith(t, admin, "POST", srv.URL+"/api/users", `{"email":"new@example.com","role":"user","password":"temporary1"}`); resp.StatusCode != 201 {
+		t.Fatalf("create = %d %s", resp.StatusCode, body)
+	}
+	c := loginClient(t, srv, "new@example.com", "temporary1")
+	if _, body := doWith(t, c, "GET", srv.URL+"/api/me", ""); !strings.Contains(body, `"mustChangePassword":true`) {
+		t.Fatalf("me = %s", body)
+	}
+	if _, body := doWith(t, c, "GET", srv.URL+"/api/status", ""); !strings.Contains(body, `"loginRequired":true`) {
+		t.Errorf("status before change = %s, want the public one", body)
+	}
+	for _, r := range []struct{ method, path string }{{"GET", "/api/recordings"}, {"POST", "/api/recording/start"}, {"GET", "/api/snapshot"}} {
+		if resp, body := doWith(t, c, r.method, srv.URL+r.path, ""); resp.StatusCode != 403 || !strings.Contains(body, "mudar a palavra-passe") {
+			t.Errorf("%s %s before change = %d %s, want 403", r.method, r.path, resp.StatusCode, body)
+		}
+	}
+	if resp, _ := doWith(t, c, "PUT", srv.URL+"/api/me/password", `{"currentPassword":"temporary1","password":"temporary1"}`); resp.StatusCode != 400 {
+		t.Errorf("same password = %d, want 400", resp.StatusCode)
+	}
+	if resp, body := doWith(t, c, "PUT", srv.URL+"/api/me/password", `{"currentPassword":"temporary1","password":"my own pass"}`); resp.StatusCode != 204 {
+		t.Fatalf("change = %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := doWith(t, c, "GET", srv.URL+"/api/recordings", ""); resp.StatusCode != 200 {
+		t.Errorf("after change = %d, want 200", resp.StatusCode)
+	}
+	if _, body := doWith(t, c, "GET", srv.URL+"/api/me", ""); !strings.Contains(body, `"mustChangePassword":false`) {
+		t.Errorf("me after change = %s", body)
 	}
 }
 
