@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -20,17 +21,17 @@ import (
 )
 
 const (
-	sessionCookie   = "srr_admin"
+	sessionCookie   = "srr_session"
 	sessionDuration = 7 * 24 * time.Hour
 	sessionKeyFile  = "session.key"
 	maxFailures     = 5
 	lockoutDuration = 15 * time.Minute
 )
 
-// auth issues and checks admin sessions. A session is a cookie
-// "<expiry>.<hmac>" signed with a random key kept in session.key, so sessions
-// survive restarts and updates. The signature also covers the password hash:
-// changing the password logs everyone out.
+// auth issues and checks user sessions. A session is a cookie
+// "<user id>.<expiry>.<hmac>" signed with a random key kept in session.key, so
+// sessions survive restarts and updates. The signature also covers the user's
+// password hash: changing a password logs that user out everywhere else.
 type auth struct {
 	key []byte
 
@@ -64,33 +65,39 @@ func loadSessionKey(path string) ([]byte, error) {
 	return key, os.WriteFile(path, []byte(hex.EncodeToString(key)), 0o600)
 }
 
-func (a *auth) sign(expiry int64, passwordHash string) string {
+func (a *auth) sign(userID string, expiry int64, passwordHash string) string {
 	m := hmac.New(sha256.New, a.key)
-	m.Write([]byte(strconv.FormatInt(expiry, 10) + "|" + passwordHash))
+	m.Write([]byte(userID + "|" + strconv.FormatInt(expiry, 10) + "|" + passwordHash))
 	return hex.EncodeToString(m.Sum(nil))
 }
 
-func (a *auth) valid(r *http.Request, passwordHash string) bool {
-	if passwordHash == "" {
-		return false
-	}
+// user returns the logged-in user, looked up again on every request so that a
+// deleted user or a changed role takes effect at once.
+func (a *auth) user(r *http.Request, store *config.Store) (config.User, bool) {
 	c, err := r.Cookie(sessionCookie)
 	if err != nil {
-		return false
+		return config.User{}, false
 	}
-	exp, sig, ok := strings.Cut(c.Value, ".")
-	expiry, err := strconv.ParseInt(exp, 10, 64)
-	if !ok || err != nil || time.Now().Unix() > expiry {
-		return false
+	parts := strings.Split(c.Value, ".")
+	if len(parts) != 3 {
+		return config.User{}, false
 	}
-	return hmac.Equal([]byte(sig), []byte(a.sign(expiry, passwordHash)))
+	expiry, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || time.Now().Unix() > expiry {
+		return config.User{}, false
+	}
+	u, ok := store.UserByID(parts[0])
+	if !ok || u.PasswordHash == "" || !hmac.Equal([]byte(parts[2]), []byte(a.sign(u.ID, expiry, u.PasswordHash))) {
+		return config.User{}, false
+	}
+	return u, true
 }
 
-func (a *auth) setSession(w http.ResponseWriter, r *http.Request, passwordHash string) {
+func (a *auth) setSession(w http.ResponseWriter, r *http.Request, u config.User) {
 	expiry := time.Now().Add(sessionDuration).Unix()
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
-		Value:    strconv.FormatInt(expiry, 10) + "." + a.sign(expiry, passwordHash),
+		Value:    u.ID + "." + strconv.FormatInt(expiry, 10) + "." + a.sign(u.ID, expiry, u.PasswordHash),
 		Path:     "/",
 		MaxAge:   int(sessionDuration.Seconds()),
 		HttpOnly: true,
@@ -156,31 +163,86 @@ func (a *auth) succeed(ip string) {
 	a.mu.Unlock()
 }
 
-var errAdminRequired = errors.New("é preciso iniciar sessão como administrador")
+var (
+	errLoginRequired = errors.New("é preciso iniciar sessão")
+	errForbidden     = errors.New("não tem permissão para isto")
+)
 
-// requireAdmin wraps handlers that only the admin may use.
-func (s *Server) requireAdmin(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.auth.valid(r, s.Store.Get().AdminPasswordHash) {
-			writeError(w, http.StatusUnauthorized, errAdminRequired)
-			return
-		}
-		h(w, r)
+// access is what an endpoint needs.
+type access int
+
+const (
+	// accessRecorder: any logged-in user. While there are no users at all
+	// (fresh install, nothing migrated) it is open to everyone, as before
+	// 2.7, so an automatic update never locks the owner out.
+	accessRecorder access = iota
+	// accessUsers: admins and user managers.
+	accessUsers
+	// accessAdmin: admins only.
+	accessAdmin
+)
+
+func allowed(role config.Role, level access) bool {
+	switch level {
+	case accessRecorder:
+		return true
+	case accessUsers:
+		return role.CanManageUsers()
+	default:
+		return role == config.RoleAdmin
 	}
 }
 
-func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
-	hash := s.Store.Get().AdminPasswordHash
-	loggedIn := s.auth.valid(r, hash)
-	if loggedIn {
-		// The page asks on every load: renewing here keeps an admin who uses
-		// the site at least once a week logged in.
-		s.auth.setSession(w, r, hash)
+type userKey struct{}
+
+// require wraps a handler with an access check. The handler finds the user,
+// if any, with userFrom.
+func (s *Server) require(level access, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		u, ok := s.auth.user(r, s.Store)
+		switch {
+		case !ok && level == accessRecorder && !s.Store.HasUsers():
+			h(w, r)
+		case !ok:
+			writeError(w, http.StatusUnauthorized, errLoginRequired)
+		case !allowed(u.Role, level):
+			writeError(w, http.StatusForbidden, errForbidden)
+		default:
+			h(w, r.WithContext(context.WithValue(r.Context(), userKey{}, u)))
+		}
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{
-		"passwordSet": hash != "",
-		"loggedIn":    loggedIn,
-	})
+}
+
+func userFrom(r *http.Request) (config.User, bool) {
+	u, ok := r.Context().Value(userKey{}).(config.User)
+	return u, ok
+}
+
+// userDTO is a user as the API shows it: never the password hash.
+type userDTO struct {
+	ID    string      `json:"id"`
+	Email string      `json:"email"`
+	Role  config.Role `json:"role"`
+}
+
+func toUserDTO(u config.User) userDTO { return userDTO{u.ID, u.Email, u.Role} }
+
+type meDTO struct {
+	// AuthRequired is false while there are no users: the recorder is open.
+	AuthRequired bool     `json:"authRequired"`
+	User         *userDTO `json:"user"`
+}
+
+func (s *Server) me(w http.ResponseWriter, r *http.Request) {
+	resp := meDTO{AuthRequired: s.Store.HasUsers()}
+	if u, ok := s.auth.user(r, s.Store); ok {
+		// The page asks on every load: renewing here keeps someone who uses
+		// the site at least once a week logged in.
+		s.auth.setSession(w, r, u)
+		d := toUserDTO(u)
+		resp.User = &d
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
@@ -190,26 +252,28 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
+		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, errors.New("pedido inválido"))
+	if !readJSON(w, r, &body) {
 		return
 	}
-	if err := s.Store.CheckAdminPassword(body.Password); err != nil {
-		if errors.Is(err, config.ErrNoAdminPassword) {
-			writeError(w, http.StatusForbidden, errors.New("ainda não foi definida a palavra-passe de administrador; defina-a no PC com: simple-rtsp-recorder.exe set-admin-password"))
-			return
-		}
+	if !s.Store.HasUsers() {
+		writeError(w, http.StatusForbidden, errors.New("ainda não existe nenhum utilizador; crie um administrador no PC com: simple-rtsp-recorder.exe add-user <email> admin"))
+		return
+	}
+	u, err := s.Store.Authenticate(body.Email, body.Password)
+	if err != nil {
 		s.auth.fail(ip)
-		s.Log.Warn("admin login failed", "ip", ip)
+		s.Log.Warn("login failed", "email", body.Email, "ip", ip)
 		writeError(w, http.StatusUnauthorized, err)
 		return
 	}
 	s.auth.succeed(ip)
-	s.auth.setSession(w, r, s.Store.Get().AdminPasswordHash)
-	s.Log.Info("admin logged in", "ip", ip)
-	writeJSON(w, http.StatusOK, map[string]bool{"passwordSet": true, "loggedIn": true})
+	s.auth.setSession(w, r, u)
+	s.Log.Info("logged in", "email", u.Email, "role", u.Role, "ip", ip)
+	d := toUserDTO(u)
+	writeJSON(w, http.StatusOK, meDTO{AuthRequired: true, User: &d})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
@@ -217,24 +281,40 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
+// changeOwnPassword asks for the current password, so that someone using a
+// session left open can't take over the account.
+func (s *Server) changeOwnPassword(w http.ResponseWriter, r *http.Request) {
+	u, ok := userFrom(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, errLoginRequired)
+		return
+	}
 	var body struct {
-		Password string `json:"password"`
+		CurrentPassword string `json:"currentPassword"`
+		Password        string `json:"password"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, errors.New("pedido inválido"))
+	if !readJSON(w, r, &body) {
 		return
 	}
-	if err := s.Store.SetAdminPassword(body.Password); err != nil {
-		code := http.StatusInternalServerError
-		if errors.Is(err, config.ErrWeakPassword) {
-			code = http.StatusBadRequest
-		}
-		writeError(w, code, err)
+	if !config.CheckPassword(u.PasswordHash, body.CurrentPassword) {
+		writeError(w, http.StatusBadRequest, errors.New("a palavra-passe atual está errada"))
 		return
 	}
-	// Other sessions are now invalid; keep this one logged in.
-	s.auth.setSession(w, r, s.Store.Get().AdminPasswordHash)
-	s.Log.Info("admin password changed", "ip", clientIP(r))
+	updated, err := s.Store.UpdateUser(u.ID, config.UserChanges{Password: &body.Password}, nil)
+	if err != nil {
+		writeUserError(w, err)
+		return
+	}
+	// Other sessions of this user are now invalid; keep this one.
+	s.auth.setSession(w, r, updated)
+	s.Log.Info("password changed", "email", u.Email, "ip", clientIP(r))
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(v); err != nil {
+		writeError(w, http.StatusBadRequest, errors.New("pedido inválido"))
+		return false
+	}
+	return true
 }

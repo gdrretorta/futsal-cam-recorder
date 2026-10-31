@@ -1,0 +1,304 @@
+package config
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"net/mail"
+	"strings"
+)
+
+// Role decides what a user can do in the web page.
+type Role string
+
+const (
+	// RoleAdmin can do everything: recorder, users, settings, logs, updates.
+	RoleAdmin Role = "admin"
+	// RoleUserManager can use the recorder and manage users other than admins.
+	RoleUserManager Role = "userManager"
+	// RoleUser can only use the recorder.
+	RoleUser Role = "user"
+)
+
+// ParseRole accepts the JSON names case-insensitively.
+func ParseRole(s string) (Role, error) {
+	for _, r := range []Role{RoleAdmin, RoleUserManager, RoleUser} {
+		if strings.EqualFold(s, string(r)) {
+			return r, nil
+		}
+	}
+	return "", ErrInvalidRole
+}
+
+// CanManageUsers reports whether the role may open the users page.
+func (r Role) CanManageUsers() bool { return r == RoleAdmin || r == RoleUserManager }
+
+// User is someone who can log in to the web page. ID never changes, so a
+// session survives a change of email.
+type User struct {
+	ID           string `json:"id"`
+	Email        string `json:"email"`
+	Role         Role   `json:"role"`
+	PasswordHash string `json:"passwordHash"`
+}
+
+// MigratedAdminEmail is the email given to the admin created from the single
+// admin password of earlier versions (see migrateUsers).
+const MigratedAdminEmail = "joao@retorta.com"
+
+var (
+	ErrInvalidEmail = errors.New("email inválido")
+	ErrInvalidRole  = errors.New("perfil inválido")
+	ErrEmailTaken   = errors.New("já existe um utilizador com este email")
+	ErrUserNotFound = errors.New("utilizador não encontrado")
+	ErrLastAdmin    = errors.New("tem de existir pelo menos um administrador")
+	ErrBadLogin     = errors.New("email ou palavra-passe errados")
+)
+
+// NormalizeEmail trims and lowercases an email and checks its format.
+func NormalizeEmail(email string) (string, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	addr, err := mail.ParseAddress(email)
+	if err != nil || addr.Address != email || addr.Name != "" {
+		return "", ErrInvalidEmail
+	}
+	return email, nil
+}
+
+func validateUsers(users []User) error {
+	ids := map[string]bool{}
+	emails := map[string]bool{}
+	for i := range users {
+		u := &users[i]
+		email, err := NormalizeEmail(u.Email)
+		if err != nil {
+			return err
+		}
+		u.Email = email
+		if _, err := ParseRole(string(u.Role)); err != nil {
+			return err
+		}
+		if u.ID == "" || ids[u.ID] {
+			return errors.New("utilizador com id em falta ou repetido")
+		}
+		if emails[u.Email] {
+			return ErrEmailTaken
+		}
+		ids[u.ID], emails[u.Email] = true, true
+	}
+	return nil
+}
+
+func newUserID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(b)
+}
+
+// migrateUsers turns the single admin password of earlier versions into an
+// admin user with the same password, so the owner keeps access after the
+// automatic update. It reports whether cfg changed.
+func migrateUsers(cfg *Config) bool {
+	if cfg.AdminPasswordHash == "" {
+		return false
+	}
+	if len(cfg.Users) == 0 {
+		cfg.Users = []User{{ID: newUserID(), Email: MigratedAdminEmail, Role: RoleAdmin, PasswordHash: cfg.AdminPasswordHash}}
+	}
+	cfg.AdminPasswordHash = ""
+	return true
+}
+
+func findUser(users []User, match func(User) bool) int {
+	for i, u := range users {
+		if match(u) {
+			return i
+		}
+	}
+	return -1
+}
+
+func adminCount(users []User) int {
+	n := 0
+	for _, u := range users {
+		if u.Role == RoleAdmin {
+			n++
+		}
+	}
+	return n
+}
+
+// UserByID returns the user with that id.
+func (s *Store) UserByID(id string) (User, bool) {
+	users := s.Get().Users
+	if i := findUser(users, func(u User) bool { return u.ID == id }); i >= 0 {
+		return users[i], true
+	}
+	return User{}, false
+}
+
+// HasUsers reports whether login is required.
+func (s *Store) HasUsers() bool { return len(s.Get().Users) > 0 }
+
+// HasAdmin reports whether some user is an admin.
+func (s *Store) HasAdmin() bool { return adminCount(s.Get().Users) > 0 }
+
+// dummyHash makes a login with an unknown email take as long as one with a
+// wrong password, so the timing doesn't reveal which emails exist.
+var dummyHash, _ = HashPassword("not a real password")
+
+// Authenticate checks an email and password.
+func (s *Store) Authenticate(email, password string) (User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	users := s.Get().Users
+	i := findUser(users, func(u User) bool { return u.Email == email })
+	if i < 0 {
+		CheckPassword(dummyHash, password)
+		return User{}, ErrBadLogin
+	}
+	if !CheckPassword(users[i].PasswordHash, password) {
+		return User{}, ErrBadLogin
+	}
+	return users[i], nil
+}
+
+// AddUser creates a user.
+func (s *Store) AddUser(email string, role Role, password string) (User, error) {
+	email, err := NormalizeEmail(email)
+	if err != nil {
+		return User{}, err
+	}
+	if role, err = ParseRole(string(role)); err != nil {
+		return User{}, err
+	}
+	hash, err := HashPassword(password)
+	if err != nil {
+		return User{}, err
+	}
+	u := User{ID: newUserID(), Email: email, Role: role, PasswordHash: hash}
+	return u, s.Edit(func(c *Config) error {
+		if findUser(c.Users, func(x User) bool { return x.Email == email }) >= 0 {
+			return ErrEmailTaken
+		}
+		if role != RoleAdmin && adminCount(c.Users) == 0 {
+			return errors.New("o primeiro utilizador tem de ser administrador")
+		}
+		c.Users = append(c.Users, u)
+		return nil
+	})
+}
+
+// UserChanges are the fields to change in UpdateUser; nil keeps the value.
+type UserChanges struct {
+	Email    *string
+	Role     *Role
+	Password *string
+}
+
+// UpdateUser changes a user. check, when not nil, sees the user before and
+// after the change and can refuse it (permission rules of the caller).
+func (s *Store) UpdateUser(id string, ch UserChanges, check func(before, after User) error) (User, error) {
+	var after User
+	if ch.Email != nil {
+		email, err := NormalizeEmail(*ch.Email)
+		if err != nil {
+			return User{}, err
+		}
+		ch.Email = &email
+	}
+	if ch.Role != nil {
+		role, err := ParseRole(string(*ch.Role))
+		if err != nil {
+			return User{}, err
+		}
+		ch.Role = &role
+	}
+	hash := ""
+	if ch.Password != nil {
+		var err error
+		if hash, err = HashPassword(*ch.Password); err != nil {
+			return User{}, err
+		}
+	}
+	err := s.Edit(func(c *Config) error {
+		i := findUser(c.Users, func(u User) bool { return u.ID == id })
+		if i < 0 {
+			return ErrUserNotFound
+		}
+		before := c.Users[i]
+		after = before
+		if ch.Email != nil {
+			if j := findUser(c.Users, func(u User) bool { return u.Email == *ch.Email }); j >= 0 && j != i {
+				return ErrEmailTaken
+			}
+			after.Email = *ch.Email
+		}
+		if ch.Role != nil {
+			after.Role = *ch.Role
+		}
+		if hash != "" {
+			after.PasswordHash = hash
+		}
+		if check != nil {
+			if err := check(before, after); err != nil {
+				return err
+			}
+		}
+		admins := adminCount(c.Users)
+		c.Users[i] = after
+		if admins > 0 && adminCount(c.Users) == 0 {
+			return ErrLastAdmin
+		}
+		return nil
+	})
+	return after, err
+}
+
+// DeleteUser removes a user. check works as in UpdateUser.
+func (s *Store) DeleteUser(id string, check func(User) error) error {
+	return s.Edit(func(c *Config) error {
+		i := findUser(c.Users, func(u User) bool { return u.ID == id })
+		if i < 0 {
+			return ErrUserNotFound
+		}
+		if check != nil {
+			if err := check(c.Users[i]); err != nil {
+				return err
+			}
+		}
+		admins := adminCount(c.Users)
+		c.Users = append(c.Users[:i], c.Users[i+1:]...)
+		if admins > 0 && adminCount(c.Users) == 0 {
+			return ErrLastAdmin
+		}
+		return nil
+	})
+}
+
+// SetUser creates the user, or sets the role and password of an existing one
+// (used by the add-user command on the PC).
+func (s *Store) SetUser(email string, role Role, password string) (User, error) {
+	norm, err := NormalizeEmail(email)
+	if err != nil {
+		return User{}, err
+	}
+	users := s.Get().Users
+	if i := findUser(users, func(u User) bool { return u.Email == norm }); i >= 0 {
+		return s.UpdateUser(users[i].ID, UserChanges{Role: &role, Password: &password}, nil)
+	}
+	return s.AddUser(norm, role, password)
+}
+
+// SetAdminPassword sets the password of the first admin (used by the
+// set-admin-password command on the PC, kept for compatibility).
+func (s *Store) SetAdminPassword(password string) error {
+	users := s.Get().Users
+	i := findUser(users, func(u User) bool { return u.Role == RoleAdmin })
+	if i < 0 {
+		return errors.New("não existe nenhum administrador; crie um com: simple-rtsp-recorder.exe add-user <email> admin")
+	}
+	_, err := s.UpdateUser(users[i].ID, UserChanges{Password: &password}, nil)
+	return err
+}

@@ -1,20 +1,30 @@
 // Package server exposes the web UI and its JSON API.
 //
-//	GET    /api/status               recorder, update and disk status
-//	POST   /api/recording/start      start recording
-//	POST   /api/recording/stop       stop recording
-//	GET    /api/recordings           list recordings
-//	DELETE /api/recordings/{name}    delete a recording
-//	GET    /recordings/{name}        play (range requests) or ?download=1
-//	GET    /api/snapshot             JPEG frame from the camera (cached)
+// Access: [user] any logged-in user, [users] admins and user managers,
+// [admin] admins only. While no user exists, [user] endpoints are open to
+// everyone (see accessRecorder). /recordings/{name} is always public, so a
+// recording's link can be shared.
+//
+//	GET    /api/status               recorder, update and disk status; only
+//	                                 {title, version, loginRequired} without access
+//	POST   /api/recording/start      start recording                          [user]
+//	POST   /api/recording/stop       stop recording                           [user]
+//	GET    /api/recordings           list recordings                          [user]
+//	DELETE /api/recordings/{name}    delete a recording                       [user]
+//	GET    /recordings/{name}        play (range requests) or ?download=1     public
+//	GET    /api/snapshot             JPEG frame from the camera (cached)      [user]
+//	GET    /api/me                   {authRequired, user}; renews the session
+//	POST   /api/login                {email, password} → session cookie
+//	POST   /api/logout               end the session
+//	PUT    /api/me/password          {currentPassword, password}              [user]
+//	GET    /api/users                list users                               [users]
+//	POST   /api/users                {email, role, password} create a user    [users]
+//	PUT    /api/users/{id}           {email?, role?, password?} change a user [users]
+//	DELETE /api/users/{id}           delete a user                            [users]
 //	GET    /api/settings             settings (password never returned)       [admin]
 //	PUT    /api/settings             save settings                            [admin]
 //	POST   /api/settings/test        test camera settings, returns a JPEG     [admin]
-//	GET    /api/admin                {passwordSet, loggedIn}
-//	POST   /api/admin/login          {password} → session cookie
-//	POST   /api/admin/logout         end the session
-//	PUT    /api/admin/password       {password} change the admin password     [admin]
-//	POST   /api/update/check         check for updates now
+//	POST   /api/update/check         check for updates now                    [admin]
 //	GET    /api/logs                 recent log lines                         [admin]
 package server
 
@@ -60,25 +70,32 @@ type Server struct {
 func (s *Server) Handler() http.Handler {
 	var err error
 	if s.auth, err = newAuth(s.Store.BaseDir()); err != nil {
-		s.Log.Warn("could not save the session key; admin sessions will end on restart", "err", err)
+		s.Log.Warn("could not save the session key; sessions will end on restart", "err", err)
 	}
+	user, users, admin := func(h http.HandlerFunc) http.HandlerFunc { return s.require(accessRecorder, h) },
+		func(h http.HandlerFunc) http.HandlerFunc { return s.require(accessUsers, h) },
+		func(h http.HandlerFunc) http.HandlerFunc { return s.require(accessAdmin, h) }
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/status", s.status)
-	mux.HandleFunc("POST /api/recording/start", s.start)
-	mux.HandleFunc("POST /api/recording/stop", s.stop)
-	mux.HandleFunc("GET /api/recordings", s.list)
-	mux.HandleFunc("DELETE /api/recordings/{name}", s.remove)
+	mux.HandleFunc("POST /api/recording/start", user(s.start))
+	mux.HandleFunc("POST /api/recording/stop", user(s.stop))
+	mux.HandleFunc("GET /api/recordings", user(s.list))
+	mux.HandleFunc("DELETE /api/recordings/{name}", user(s.remove))
 	mux.HandleFunc("GET /recordings/{name}", s.serveRecording)
-	mux.HandleFunc("GET /api/snapshot", s.snapshot)
-	mux.HandleFunc("GET /api/settings", s.requireAdmin(s.getSettings))
-	mux.HandleFunc("PUT /api/settings", s.requireAdmin(s.putSettings))
-	mux.HandleFunc("POST /api/settings/test", s.requireAdmin(s.testSettings))
-	mux.HandleFunc("GET /api/admin", s.adminStatus)
-	mux.HandleFunc("POST /api/admin/login", s.login)
-	mux.HandleFunc("POST /api/admin/logout", s.logout)
-	mux.HandleFunc("PUT /api/admin/password", s.requireAdmin(s.changePassword))
-	mux.HandleFunc("POST /api/update/check", s.checkUpdate)
-	mux.HandleFunc("GET /api/logs", s.requireAdmin(s.logs))
+	mux.HandleFunc("GET /api/snapshot", user(s.snapshot))
+	mux.HandleFunc("GET /api/me", s.me)
+	mux.HandleFunc("POST /api/login", s.login)
+	mux.HandleFunc("POST /api/logout", s.logout)
+	mux.HandleFunc("PUT /api/me/password", user(s.changeOwnPassword))
+	mux.HandleFunc("GET /api/users", users(s.listUsers))
+	mux.HandleFunc("POST /api/users", users(s.createUser))
+	mux.HandleFunc("PUT /api/users/{id}", users(s.updateUser))
+	mux.HandleFunc("DELETE /api/users/{id}", users(s.deleteUser))
+	mux.HandleFunc("GET /api/settings", admin(s.getSettings))
+	mux.HandleFunc("PUT /api/settings", admin(s.putSettings))
+	mux.HandleFunc("POST /api/settings/test", admin(s.testSettings))
+	mux.HandleFunc("POST /api/update/check", admin(s.checkUpdate))
+	mux.HandleFunc("GET /api/logs", admin(s.logs))
 	mux.Handle("GET /", newStaticHandler(s.Static))
 	return mux
 }
@@ -88,8 +105,15 @@ type disk struct {
 	Total uint64 `json:"total"`
 }
 
+// status is public, so that a page left open across an update still sees the
+// new version and reloads (an error would only show "Sem ligação"). Without
+// access it reveals nothing but the title and version.
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Store.Get()
+	if _, ok := s.auth.user(r, s.Store); !ok && len(cfg.Users) > 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"title": cfg.Title, "version": s.Version, "loginRequired": true})
+		return
+	}
 	resp := struct {
 		Title      string          `json:"title"`
 		Version    string          `json:"version"`
@@ -243,7 +267,7 @@ func toDTO(c config.Config) settingsDTO {
 }
 
 // apply merges the DTO into the current settings. Fields only editable in
-// config.json (port, ffmpegPath, camera.url) are kept.
+// config.json (port, ffmpegPath, camera.url) and the users are kept.
 func (d settingsDTO) apply(c config.Config) config.Config {
 	c.Title = d.Title
 	pw := c.Camera.Password
@@ -259,26 +283,32 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toDTO(s.Store.Get()))
 }
 
-func (s *Server) readSettings(w http.ResponseWriter, r *http.Request) (config.Config, bool) {
+func (s *Server) readSettings(w http.ResponseWriter, r *http.Request) (settingsDTO, config.Config, bool) {
 	var d settingsDTO
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&d); err != nil {
 		writeError(w, http.StatusBadRequest, errors.New("pedido inválido"))
-		return config.Config{}, false
+		return d, config.Config{}, false
 	}
 	cfg := d.apply(s.Store.Get())
 	if err := cfg.Validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err)
-		return cfg, false
+		return d, cfg, false
 	}
-	return cfg, true
+	return d, cfg, true
 }
 
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
-	cfg, ok := s.readSettings(w, r)
+	d, _, ok := s.readSettings(w, r)
 	if !ok {
 		return
 	}
-	if err := s.Store.Update(cfg); err != nil {
+	// Applied inside Edit so that users changed meanwhile are kept.
+	var cfg config.Config
+	if err := s.Store.Edit(func(c *config.Config) error {
+		*c = d.apply(*c)
+		cfg = *c
+		return nil
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -294,7 +324,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) testSettings(w http.ResponseWriter, r *http.Request) {
-	cfg, ok := s.readSettings(w, r)
+	_, cfg, ok := s.readSettings(w, r)
 	if !ok {
 		return
 	}

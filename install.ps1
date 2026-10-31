@@ -74,9 +74,16 @@ try {
     Copy-Item -Path (Join-Path $tmp 'pkg\*') -Destination $InstallDir -Recurse -Force
 
     $exe = Join-Path $InstallDir $ExeName
+    # Upgrades from 2.6 or older turn the admin password into an admin user
+    # on their own, so this only asks on a new install.
     & $exe has-admin-password
     if ($LASTEXITCODE -ne 0) {
-        Step 'Defina a palavra-passe de administrador (protege as definições na interface web)'
+        Step 'Crie a conta de administrador (para entrar na interface web)'
+        while ($true) {
+            $email = (Read-Host '    Email').Trim()
+            if ($email -match '^[^@\s]+@[^@\s]+\.[^@\s]+$') { break }
+            Write-Host '    Email inválido.' -ForegroundColor Yellow
+        }
         while ($true) {
             $first = Read-SecretText 'Palavra-passe (mínimo 8 caracteres)'
             $second = Read-SecretText 'Repita a palavra-passe'
@@ -87,9 +94,9 @@ try {
         # Passed on stdin (UTF-8) so it never shows up in the process list.
         $previousEncoding = $OutputEncoding
         $OutputEncoding = New-Object Text.UTF8Encoding $false
-        $first | & $exe set-admin-password
+        $first | & $exe add-user $email admin
         $OutputEncoding = $previousEncoding
-        if ($LASTEXITCODE -ne 0) { throw 'Falha ao guardar a palavra-passe de administrador.' }
+        if ($LASTEXITCODE -ne 0) { throw 'Falha ao criar a conta de administrador.' }
     }
 
     Step 'A instalar o serviço...'
@@ -101,6 +108,6 @@ try {
 
 Write-Host ''
 Write-Host 'Instalação concluída.' -ForegroundColor Green
-Write-Host "Interface: http://localhost:8080   (definições: ícone da engrenagem, com a palavra-passe de administrador)"
+Write-Host "Interface: http://localhost:8080   (entre com o email e a palavra-passe de administrador)"
 Write-Host "Pasta:     $InstallDir"
 Write-Host 'As próximas versões são instaladas automaticamente quando não houver gravações.'

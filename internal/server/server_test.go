@@ -32,7 +32,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *config.Store) {
 	if err := store.Update(cfg); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetAdminPassword(adminPassword); err != nil {
+	if _, err := store.AddUser(adminEmail, config.RoleAdmin, adminPassword); err != nil {
 		t.Fatal(err)
 	}
 	log := logging.Discard()
@@ -46,7 +46,10 @@ func newTestServer(t *testing.T) (*httptest.Server, *config.Store) {
 	return srv, store
 }
 
-const adminPassword = "correct horse"
+const (
+	adminEmail    = "admin@example.com"
+	adminPassword = "correct horse"
+)
 
 // client keeps cookies, like a browser.
 func client() *http.Client {
@@ -57,9 +60,15 @@ func client() *http.Client {
 // adminClient returns a client logged in as admin.
 func adminClient(t *testing.T, srv *httptest.Server) *http.Client {
 	t.Helper()
+	return loginClient(t, srv, adminEmail, adminPassword)
+}
+
+// loginClient returns a client logged in as the given user.
+func loginClient(t *testing.T, srv *httptest.Server, email, password string) *http.Client {
+	t.Helper()
 	c := client()
-	if resp, body := doWith(t, c, "POST", srv.URL+"/api/admin/login", `{"password":"`+adminPassword+`"}`); resp.StatusCode != 200 {
-		t.Fatalf("login = %d %s", resp.StatusCode, body)
+	if resp, body := doWith(t, c, "POST", srv.URL+"/api/login", `{"email":"`+email+`","password":"`+password+`"}`); resp.StatusCode != 200 {
+		t.Fatalf("login %s = %d %s", email, resp.StatusCode, body)
 	}
 	return c
 }
@@ -109,7 +118,7 @@ func TestSettingsPasswordIsWriteOnly(t *testing.T) {
 	if resp, body := do(t, "PUT", srv.URL+"/api/settings", string(payload)); resp.StatusCode != 200 {
 		t.Fatalf("PUT = %d %s", resp.StatusCode, body)
 	}
-	if got := store.Get(); got.Camera.Password != "secret" || got.Title != "Futsal" || got.AdminPasswordHash == "" {
+	if got := store.Get(); got.Camera.Password != "secret" || got.Title != "Futsal" || len(got.Users) != 1 {
 		t.Fatalf("after PUT: %+v", got)
 	}
 
@@ -135,12 +144,23 @@ func TestRecordingsEndpoints(t *testing.T) {
 	os.MkdirAll(dir, 0o755)
 	os.WriteFile(filepath.Join(dir, "2026-10-29_150000.mp4"), []byte("video"), 0o644)
 	os.WriteFile(filepath.Join(store.BaseDir(), "secret.mp4"), []byte("outside"), 0o644)
+	c := adminClient(t, srv)
+	do := func(t *testing.T, method, url, body string) (*http.Response, string) {
+		return doWith(t, c, method, url, body)
+	}
 
+	if resp, _ := doWith(t, client(), "GET", srv.URL+"/api/recordings", ""); resp.StatusCode != 401 {
+		t.Fatalf("list without login = %d, want 401", resp.StatusCode)
+	}
 	_, body := do(t, "GET", srv.URL+"/api/recordings", "")
 	if !strings.Contains(body, "2026-10-29_150000.mp4") {
 		t.Fatalf("list = %s", body)
 	}
 
+	// The shared link works without logging in.
+	if resp, body := doWith(t, client(), "GET", srv.URL+"/recordings/2026-10-29_150000.mp4", ""); resp.StatusCode != 200 || body != "video" {
+		t.Fatalf("public link = %d %q", resp.StatusCode, body)
+	}
 	resp, body := do(t, "GET", srv.URL+"/recordings/2026-10-29_150000.mp4?download=1", "")
 	if resp.StatusCode != 200 || body != "video" || !strings.Contains(resp.Header.Get("Content-Disposition"), "attachment") {
 		t.Fatalf("download = %d %q %v", resp.StatusCode, body, resp.Header)
@@ -169,7 +189,13 @@ func TestRecordingsEndpoints(t *testing.T) {
 
 func TestStatusAndStatic(t *testing.T) {
 	srv, _ := newTestServer(t)
+	// Without login, only what a page needs to reload after an update.
 	resp, body := do(t, "GET", srv.URL+"/api/status", "")
+	if resp.StatusCode != 200 || body != `{"loginRequired":true,"title":"Simple RTSP Recorder","version":"test"}`+"\n" {
+		t.Fatalf("anonymous status = %d %s", resp.StatusCode, body)
+	}
+	c := adminClient(t, srv)
+	resp, body = doWith(t, c, "GET", srv.URL+"/api/status", "")
 	if resp.StatusCode != 200 || !strings.Contains(body, `"state":"idle"`) || !strings.Contains(body, `"configured":true`) {
 		t.Fatalf("status = %d %s", resp.StatusCode, body)
 	}
@@ -177,35 +203,163 @@ func TestStatusAndStatic(t *testing.T) {
 	if resp.StatusCode != 200 || !strings.Contains(body, "<title>") {
 		t.Fatalf("index = %d", resp.StatusCode)
 	}
-	if resp, _ := do(t, "POST", srv.URL+"/api/recording/stop", ""); resp.StatusCode != 409 {
+	if resp, _ := doWith(t, c, "POST", srv.URL+"/api/recording/stop", ""); resp.StatusCode != 409 {
 		t.Fatalf("stop while idle = %d, want 409", resp.StatusCode)
 	}
 }
 
-func TestSettingsRequireAdmin(t *testing.T) {
-	srv, store := newTestServer(t)
-	anon := client()
-	for _, r := range []struct{ method, path string }{
-		{"GET", "/api/settings"}, {"PUT", "/api/settings"}, {"POST", "/api/settings/test"}, {"PUT", "/api/admin/password"},
-		{"GET", "/api/logs"},
-	} {
-		if resp, _ := doWith(t, anon, r.method, srv.URL+r.path, `{"password":"hijacked!"}`); resp.StatusCode != 401 {
-			t.Errorf("%s %s without login = %d, want 401", r.method, r.path, resp.StatusCode)
-		}
+// addUser creates a user directly in the store and logs it in.
+func addUser(t *testing.T, srv *httptest.Server, store *config.Store, email string, role config.Role) (config.User, *http.Client) {
+	t.Helper()
+	u, err := store.AddUser(email, role, "password "+email)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if store.CheckAdminPassword(adminPassword) != nil {
-		t.Fatal("admin password changed without login")
+	return u, loginClient(t, srv, email, "password "+email)
+}
+
+func TestAccessByRole(t *testing.T) {
+	srv, store := newTestServer(t)
+	_, manager := addUser(t, srv, store, "manager@example.com", config.RoleUserManager)
+	_, user := addUser(t, srv, store, "user@example.com", config.RoleUser)
+	clients := map[string]*http.Client{"anon": client(), "user": user, "manager": manager, "admin": adminClient(t, srv)}
+
+	// Expected status per client: anon, user, manager, admin. 0 = "allowed"
+	// (anything but 401/403: the handler ran).
+	const ok = 0
+	for _, c := range []struct {
+		method, path string
+		want         [4]int
+	}{
+		{"GET", "/api/recordings", [4]int{401, ok, ok, ok}},
+		{"POST", "/api/recording/stop", [4]int{401, ok, ok, ok}},
+		{"DELETE", "/api/recordings/2026-01-01_000000.mp4", [4]int{401, ok, ok, ok}},
+		{"GET", "/api/snapshot", [4]int{401, ok, ok, ok}},
+		{"GET", "/api/users", [4]int{401, 403, ok, ok}},
+		{"POST", "/api/users", [4]int{401, 403, ok, ok}},
+		{"PUT", "/api/users/x", [4]int{401, 403, ok, ok}},
+		{"DELETE", "/api/users/x", [4]int{401, 403, ok, ok}},
+		{"GET", "/api/settings", [4]int{401, 403, 403, ok}},
+		{"PUT", "/api/settings", [4]int{401, 403, 403, ok}},
+		{"POST", "/api/settings/test", [4]int{401, 403, 403, ok}},
+		{"POST", "/api/update/check", [4]int{401, 403, 403, ok}},
+		{"GET", "/api/logs", [4]int{401, 403, 403, ok}},
+		{"PUT", "/api/me/password", [4]int{401, ok, ok, ok}},
+	} {
+		for i, who := range []string{"anon", "user", "manager", "admin"} {
+			resp, body := doWith(t, clients[who], c.method, srv.URL+c.path, `{}`)
+			got := resp.StatusCode
+			if c.want[i] == ok && got != 401 && got != 403 {
+				continue
+			}
+			if got != c.want[i] {
+				t.Errorf("%s %s as %s = %d %s", c.method, c.path, who, got, body)
+			}
+		}
 	}
 
 	// A forged cookie is rejected.
-	req, _ := http.NewRequest("GET", srv.URL+"/api/settings", nil)
-	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "99999999999.deadbeef"})
+	req, _ := http.NewRequest("GET", srv.URL+"/api/recordings", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "x.99999999999.deadbeef"})
 	if resp, _ := http.DefaultClient.Do(req); resp.StatusCode != 401 {
 		t.Errorf("forged cookie = %d, want 401", resp.StatusCode)
 	}
 
-	if _, body := doWith(t, anon, "GET", srv.URL+"/api/admin", ""); body != `{"loggedIn":false,"passwordSet":true}`+"\n" {
-		t.Errorf("admin status = %s", body)
+	if _, body := doWith(t, clients["anon"], "GET", srv.URL+"/api/me", ""); body != `{"authRequired":true,"user":null}`+"\n" {
+		t.Errorf("me (anon) = %s", body)
+	}
+	_, body := doWith(t, manager, "GET", srv.URL+"/api/me", "")
+	if !strings.Contains(body, `"email":"manager@example.com","role":"userManager"`) {
+		t.Errorf("me (manager) = %s", body)
+	}
+}
+
+func TestUserManagement(t *testing.T) {
+	srv, store := newTestServer(t)
+	admin := adminClient(t, srv)
+	adminUser := store.Get().Users[0]
+	mgrUser, manager := addUser(t, srv, store, "manager@example.com", config.RoleUserManager)
+	plain, plainClient := addUser(t, srv, store, "user@example.com", config.RoleUser)
+
+	// The list never contains password hashes.
+	_, body := doWith(t, manager, "GET", srv.URL+"/api/users", "")
+	if strings.Contains(body, "pbkdf2") || strings.Contains(body, "asswordHash") || strings.Count(body, `"id"`) != 3 {
+		t.Fatalf("list = %s", body)
+	}
+
+	// A user manager can't create, promote to, edit or delete admins.
+	for _, c := range []struct{ method, path, body string }{
+		{"POST", "/api/users", `{"email":"x@example.com","role":"admin","password":"password1"}`},
+		{"PUT", "/api/users/" + plain.ID, `{"role":"admin"}`},
+		{"PUT", "/api/users/" + mgrUser.ID, `{"role":"admin"}`},
+		{"PUT", "/api/users/" + adminUser.ID, `{"password":"hijacked!"}`},
+		{"DELETE", "/api/users/" + adminUser.ID, ``},
+	} {
+		if resp, body := doWith(t, manager, c.method, srv.URL+c.path, c.body); resp.StatusCode != 403 {
+			t.Errorf("manager %s %s %s = %d %s, want 403", c.method, c.path, c.body, resp.StatusCode, body)
+		}
+	}
+	if _, err := store.Authenticate(adminEmail, adminPassword); err != nil {
+		t.Fatal("admin password changed by a user manager")
+	}
+
+	// But can manage users and user managers.
+	resp, body := doWith(t, manager, "POST", srv.URL+"/api/users", `{"email":"New@Example.com","role":"user","password":"password1"}`)
+	if resp.StatusCode != 201 || !strings.Contains(body, `"email":"new@example.com"`) {
+		t.Fatalf("create = %d %s", resp.StatusCode, body)
+	}
+	var created userDTO
+	json.Unmarshal([]byte(body), &created)
+	for _, c := range []struct {
+		body string
+		want int
+	}{
+		{`{"email":"new@example.com","role":"user","password":"password1"}`, 409},
+		{`{"email":"bad","role":"user","password":"password1"}`, 400},
+		{`{"email":"b@example.com","role":"user","password":"short"}`, 400},
+		{`{"email":"b@example.com","role":"boss","password":"password1"}`, 400},
+	} {
+		if resp, body := doWith(t, manager, "POST", srv.URL+"/api/users", c.body); resp.StatusCode != c.want {
+			t.Errorf("create %s = %d %s, want %d", c.body, resp.StatusCode, body, c.want)
+		}
+	}
+	if resp, body := doWith(t, manager, "PUT", srv.URL+"/api/users/"+created.ID, `{"role":"userManager","password":""}`); resp.StatusCode != 200 || !strings.Contains(body, `"role":"userManager"`) {
+		t.Fatalf("promote = %d %s", resp.StatusCode, body)
+	}
+	if _, err := store.Authenticate("new@example.com", "password1"); err != nil {
+		t.Fatal("empty password in update must keep the old one")
+	}
+
+	// Nobody can delete themselves.
+	if resp, _ := doWith(t, manager, "DELETE", srv.URL+"/api/users/"+mgrUser.ID, ""); resp.StatusCode != 403 {
+		t.Errorf("delete self = %d, want 403", resp.StatusCode)
+	}
+	// The last admin can't be demoted, even by itself.
+	if resp, _ := doWith(t, admin, "PUT", srv.URL+"/api/users/"+adminUser.ID, `{"role":"user"}`); resp.StatusCode != 409 {
+		t.Errorf("demote last admin = %d, want 409", resp.StatusCode)
+	}
+
+	// A role change applies at once to existing sessions.
+	if resp, _ := doWith(t, plainClient, "GET", srv.URL+"/api/users", ""); resp.StatusCode != 403 {
+		t.Fatal("user reached the users page")
+	}
+	doWith(t, admin, "PUT", srv.URL+"/api/users/"+plain.ID, `{"role":"userManager"}`)
+	if resp, _ := doWith(t, plainClient, "GET", srv.URL+"/api/users", ""); resp.StatusCode != 200 {
+		t.Errorf("after promotion = %d, want 200", resp.StatusCode)
+	}
+	// A password change by someone else logs the user out; a deleted user too.
+	doWith(t, admin, "PUT", srv.URL+"/api/users/"+plain.ID, `{"password":"another password"}`)
+	if resp, _ := doWith(t, plainClient, "GET", srv.URL+"/api/recordings", ""); resp.StatusCode != 401 {
+		t.Errorf("after password reset = %d, want 401", resp.StatusCode)
+	}
+	if resp, _ := doWith(t, admin, "DELETE", srv.URL+"/api/users/"+mgrUser.ID, ""); resp.StatusCode != 204 {
+		t.Fatalf("delete = %d", resp.StatusCode)
+	}
+	if resp, _ := doWith(t, manager, "GET", srv.URL+"/api/recordings", ""); resp.StatusCode != 401 {
+		t.Errorf("deleted user's session = %d, want 401", resp.StatusCode)
+	}
+	if resp, _ := doWith(t, admin, "DELETE", srv.URL+"/api/users/"+mgrUser.ID, ""); resp.StatusCode != 404 {
+		t.Errorf("delete twice = %d, want 404", resp.StatusCode)
 	}
 }
 
@@ -213,21 +367,25 @@ func TestLoginLockoutAndPasswordChange(t *testing.T) {
 	srv, _ := newTestServer(t)
 	c := client()
 	for i := 0; i < maxFailures; i++ {
-		if resp, _ := doWith(t, c, "POST", srv.URL+"/api/admin/login", `{"password":"wrong"}`); resp.StatusCode != 401 {
+		if resp, _ := doWith(t, c, "POST", srv.URL+"/api/login", `{"email":"`+adminEmail+`","password":"wrong"}`); resp.StatusCode != 401 {
 			t.Fatalf("wrong password = %d, want 401", resp.StatusCode)
 		}
 	}
-	if resp, _ := doWith(t, c, "POST", srv.URL+"/api/admin/login", `{"password":"`+adminPassword+`"}`); resp.StatusCode != 429 {
+	if resp, _ := doWith(t, c, "POST", srv.URL+"/api/login", `{"email":"`+adminEmail+`","password":"`+adminPassword+`"}`); resp.StatusCode != 429 {
 		t.Fatalf("login after lockout = %d, want 429", resp.StatusCode)
 	}
 
-	// Changing the password logs out other sessions but keeps this one.
+	// Changing the own password needs the current one, logs out other
+	// sessions but keeps this one.
 	srv2, _ := newTestServer(t)
 	a, b := adminClient(t, srv2), adminClient(t, srv2)
-	if resp, body := doWith(t, a, "PUT", srv2.URL+"/api/admin/password", `{"password":"short"}`); resp.StatusCode != 400 {
+	if resp, body := doWith(t, a, "PUT", srv2.URL+"/api/me/password", `{"currentPassword":"`+adminPassword+`","password":"short"}`); resp.StatusCode != 400 {
 		t.Fatalf("weak password = %d %s, want 400", resp.StatusCode, body)
 	}
-	if resp, _ := doWith(t, a, "PUT", srv2.URL+"/api/admin/password", `{"password":"a new password"}`); resp.StatusCode != 204 {
+	if resp, _ := doWith(t, a, "PUT", srv2.URL+"/api/me/password", `{"currentPassword":"wrong","password":"a new password"}`); resp.StatusCode != 400 {
+		t.Fatalf("wrong current password = %d, want 400", resp.StatusCode)
+	}
+	if resp, _ := doWith(t, a, "PUT", srv2.URL+"/api/me/password", `{"currentPassword":"`+adminPassword+`","password":"a new password"}`); resp.StatusCode != 204 {
 		t.Fatalf("change password = %d", resp.StatusCode)
 	}
 	if resp, _ := doWith(t, a, "GET", srv2.URL+"/api/settings", ""); resp.StatusCode != 200 {
@@ -238,7 +396,7 @@ func TestLoginLockoutAndPasswordChange(t *testing.T) {
 	}
 
 	// Logout ends the session.
-	doWith(t, a, "POST", srv2.URL+"/api/admin/logout", "")
+	doWith(t, a, "POST", srv2.URL+"/api/logout", "")
 	if resp, _ := doWith(t, a, "GET", srv2.URL+"/api/settings", ""); resp.StatusCode != 401 {
 		t.Errorf("after logout = %d, want 401", resp.StatusCode)
 	}
@@ -247,7 +405,7 @@ func TestLoginLockoutAndPasswordChange(t *testing.T) {
 func TestSessionSurvivesRestart(t *testing.T) {
 	srv, store := newTestServer(t)
 	c := adminClient(t, srv)
-	resp, _ := doWith(t, c, "GET", srv.URL+"/api/admin", "")
+	resp, _ := doWith(t, c, "GET", srv.URL+"/api/me", "")
 	var renewed *http.Cookie
 	for _, ck := range resp.Cookies() {
 		if ck.Name == sessionCookie {
@@ -270,16 +428,32 @@ func TestSessionSurvivesRestart(t *testing.T) {
 	}
 }
 
-func TestLoginWithoutPasswordSet(t *testing.T) {
+// Without any user (fresh install), the recorder stays open as before 2.7 so
+// an automatic update never locks anyone out; settings stay closed.
+func TestOpenModeWithoutUsers(t *testing.T) {
 	srv, store := newTestServer(t)
 	cfg := store.Get()
-	cfg.AdminPasswordHash = ""
+	cfg.Users = nil
 	store.Update(cfg)
-	if resp, body := do(t, "POST", srv.URL+"/api/admin/login", `{"password":""}`); resp.StatusCode != 403 || !strings.Contains(body, "set-admin-password") {
-		t.Fatalf("login with no password set = %d %s", resp.StatusCode, body)
+	if resp, body := do(t, "GET", srv.URL+"/api/status", ""); resp.StatusCode != 200 || !strings.Contains(body, `"recorder"`) {
+		t.Fatalf("status = %d %s", resp.StatusCode, body)
 	}
-	if resp, _ := do(t, "GET", srv.URL+"/api/settings", ""); resp.StatusCode != 401 {
-		t.Fatalf("settings with no password set = %d, want 401", resp.StatusCode)
+	if resp, _ := do(t, "GET", srv.URL+"/api/recordings", ""); resp.StatusCode != 200 {
+		t.Fatalf("recordings = %d, want 200", resp.StatusCode)
+	}
+	if _, body := do(t, "GET", srv.URL+"/api/me", ""); body != `{"authRequired":false,"user":null}`+"\n" {
+		t.Fatalf("me = %s", body)
+	}
+	if resp, body := do(t, "POST", srv.URL+"/api/login", `{"email":"a@b.pt","password":"x"}`); resp.StatusCode != 403 || !strings.Contains(body, "add-user") {
+		t.Fatalf("login with no users = %d %s", resp.StatusCode, body)
+	}
+	for _, path := range []string{"/api/settings", "/api/users", "/api/logs"} {
+		if resp, _ := do(t, "GET", srv.URL+path, ""); resp.StatusCode != 401 {
+			t.Errorf("%s with no users = %d, want 401", path, resp.StatusCode)
+		}
+	}
+	if resp, _ := do(t, "PUT", srv.URL+"/api/me/password", `{"password":"password1"}`); resp.StatusCode != 401 {
+		t.Errorf("me/password with no users = %d, want 401", resp.StatusCode)
 	}
 }
 

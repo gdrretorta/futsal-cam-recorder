@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -18,7 +17,7 @@ const (
 	minPasswordLen   = 8
 )
 
-// ErrWeakPassword is returned for admin passwords that are too short.
+// ErrWeakPassword is returned for passwords that are too short.
 var ErrWeakPassword = fmt.Errorf("a palavra-passe tem de ter pelo menos %d caracteres", minPasswordLen)
 
 // HashPassword returns "pbkdf2-sha256$<iterations>$<salt>$<hash>".
@@ -53,30 +52,4 @@ func CheckPassword(hash, password string) bool {
 	}
 	got, err := pbkdf2.Key(sha256.New, password, salt, iter, len(want))
 	return err == nil && subtle.ConstantTimeCompare(got, want) == 1
-}
-
-// SetAdminPassword hashes and stores a new admin password.
-func (s *Store) SetAdminPassword(password string) error {
-	hash, err := HashPassword(password)
-	if err != nil {
-		return err
-	}
-	cfg := s.Get()
-	cfg.AdminPasswordHash = hash
-	return s.Update(cfg)
-}
-
-// ErrNoAdminPassword means no admin password was set yet (see set-admin-password).
-var ErrNoAdminPassword = errors.New("palavra-passe de administrador não definida")
-
-// CheckAdminPassword verifies the admin password.
-func (s *Store) CheckAdminPassword(password string) error {
-	hash := s.Get().AdminPasswordHash
-	if hash == "" {
-		return ErrNoAdminPassword
-	}
-	if !CheckPassword(hash, password) {
-		return errors.New("palavra-passe errada")
-	}
-	return nil
 }

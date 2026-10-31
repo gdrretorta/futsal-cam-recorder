@@ -5,7 +5,9 @@ A single executable that runs as a Windows service and **updates itself** from G
 
 - One-click record and stop, with a live camera preview and a timer
 - Recordings list with an in-browser player, download and delete
-- Camera settings in the UI, with a "test connection" button, protected by an admin password
+- Login with email and password, with three roles: **Admin** (everything), **UserManager** (recorder and users) and **User** (recorder only)
+- A recording's link can be copied and shared: it plays without logging in
+- Camera settings in the UI, with a "test connection" button (admins only)
 - Recordings survive power cuts: files are fragmented MP4 while recording and finalized when stopped
 - Reconnects automatically if the camera drops, and resumes recording after a PC or service restart
 - Optional automatic deletion of old recordings, plus a disk space indicator
@@ -19,15 +21,17 @@ Run PowerShell **as Administrator**:
 irm https://raw.githubusercontent.com/joaoopereira/simple-rtsp-recorder/development/install.ps1 | iex
 ```
 
-The installer asks for an **admin password**. The settings (⚙️) are only available after logging in with it. Then open `http://localhost:8080` and set up the camera.
+The installer asks for the **email and password of the first admin**. Open `http://localhost:8080`, log in, set up the camera (⚙️) and add the other users (👥).
 
 The same command upgrades an existing installation, including 1.x (Node.js) installs. It installs into the existing folder, converts `prod.env` to `config.json` and keeps the recordings. After that, updates are automatic.
 
-To reset the admin password, run this on the PC as Administrator, in the install folder:
+To create a user or reset its password from the PC (role `admin`, `userManager` or `user`), run this as Administrator, in the install folder:
 
 ```powershell
-'nova-palavra-passe' | .\simple-rtsp-recorder.exe set-admin-password
+'nova-palavra-passe' | .\simple-rtsp-recorder.exe add-user joao@exemplo.pt admin
 ```
+
+Upgrades from 2.6 or older turn the old admin password into an admin user with the same password. While no user exists, the recorder is open to everyone, as in older versions.
 
 <details>
 <summary>Manual install</summary>
@@ -51,7 +55,7 @@ Most settings are edited in the UI and stored in `config.json` next to the execu
 | `retentionDays` | Delete recordings older than N days (`0` = keep forever) |
 | `autoUpdate` | Install new releases automatically when idle |
 | `title` | Page title |
-| `adminPasswordHash` | *(set with `set-admin-password` or in the UI)* Hash of the admin password |
+| `users` | *(managed in the UI or with `add-user`)* Users: email, role and password hash |
 | `port` | *(file only)* HTTP port, default `8080`. Restart the service after changing it |
 | `ffmpegPath` | *(file only)* Custom ffmpeg. By default the app uses the `ffmpeg.exe` shipped next to it |
 

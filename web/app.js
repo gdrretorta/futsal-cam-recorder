@@ -26,6 +26,7 @@ let pending = false;
 const REC_PAGE = 5;
 let recShown = REC_PAGE; // recordings listed; "Ver mais" adds REC_PAGE
 let recordings = [];
+let me = null;            // {authRequired, user} from /api/me
 let loadedVersion = null; // version that served this page
 let updating = null;      // while an update installs: {version, since}
 
@@ -38,6 +39,8 @@ async function api(method, url, body) {
     opts.body = JSON.stringify(body);
   }
   const res = await fetch(url, opts);
+  // Session expired, user deleted or password changed elsewhere.
+  if (res.status === 401 && url !== "/api/login") loadMe();
   if (!res.ok) {
     let msg = res.statusText;
     try { msg = (await res.json()).error || msg; } catch { /* not JSON */ }
@@ -52,6 +55,7 @@ async function api(method, url, body) {
 }
 
 function toast(msg, isError = false) {
+  if (isError && !$("loginView").hidden) return; // requests cut short by a logout
   const el = $("toast");
   el.textContent = msg;
   el.classList.toggle("error", isError);
@@ -106,6 +110,10 @@ async function refreshStatus() {
     showUpdating(s.version);
     $("updateOverlayText").textContent = `Versão ${s.version} instalada. A recarregar…`;
     location.reload();
+    return;
+  }
+  if (s.loginRequired) {
+    if ($("loginView").hidden) loadMe();
     return;
   }
   status = s;
@@ -167,6 +175,12 @@ function renderStatus() {
   $("stateError").hidden = !r.error;
   $("recBadge").hidden = !(r.state === "recording" || r.state === "reconnecting");
   $("setupNotice").hidden = status.configured;
+  // Only an admin can open the settings (or anyone, while there are no users).
+  const canSetUp = !me || !me.authRequired || role() === "admin";
+  $("setupNotice").querySelector("button").hidden = !canSetUp;
+  $("setupNotice").querySelector("p").textContent = canSetUp
+    ? "A câmara ainda não está configurada."
+    : "A câmara ainda não está configurada. Peça a um administrador para a configurar.";
 
   const btn = $("recordBtn");
   btn.classList.toggle("stop", active);
@@ -282,6 +296,7 @@ const ICONS = {
   play: '<svg viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5-12-7.5Z"/></svg>',
   link: '<svg viewBox="0 0 24 24"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3.2-3.2a4.5 4.5 0 0 0-6.4-6.4L12 5.6"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3.2 3.2a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/></svg>',
   download: '<svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>',
+  edit: '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
 };
 
@@ -362,12 +377,18 @@ $("playerDlg").addEventListener("close", () => {
   $("player").load();
 });
 
-function confirmDelete(rec) {
+// confirmAction asks before something that can't be undone, then runs action.
+function confirmAction(title, text, action) {
   const dlg = $("confirmDlg");
-  $("confirmText").textContent = `${dateFmt.format(recordingDate(rec))} (${rec.name}, ${fmtBytes(rec.size)}). Esta ação não pode ser desfeita.`;
+  $("confirmTitle").textContent = title;
+  $("confirmText").textContent = text + " Esta ação não pode ser desfeita.";
   dlg.returnValue = "";
-  dlg.onclose = async () => {
-    if (dlg.returnValue !== "ok") return;
+  dlg.onclose = () => { if (dlg.returnValue === "ok") action(); };
+  dlg.showModal();
+}
+
+function confirmDelete(rec) {
+  confirmAction("Apagar gravação?", `${dateFmt.format(recordingDate(rec))} (${rec.name}, ${fmtBytes(rec.size)}).`, async () => {
     try {
       await api("DELETE", `/api/recordings/${encodeURIComponent(rec.name)}`);
       toast("Gravação apagada");
@@ -375,8 +396,7 @@ function confirmDelete(rec) {
       toast(e.message, true);
     }
     loadRecordings();
-  };
-  dlg.showModal();
+  });
 }
 
 // ---------- Settings ----------
@@ -384,18 +404,13 @@ function confirmDelete(rec) {
 const form = $("settingsForm");
 const fields = form.elements;
 
-// The settings are admin-only: log in first when there is no session.
+const NO_USERS = "Ainda não existe nenhum utilizador. Crie um administrador no PC: corra o instalador novamente ou execute \"simple-rtsp-recorder.exe add-user <email> admin\".";
+
+// The settings are admin-only. While there are no users, nobody can open
+// them: explain how to create the first admin.
 async function openSettings() {
-  let admin;
-  try {
-    admin = await api("GET", "/api/admin");
-  } catch (e) {
-    toast(e.message, true);
-    return;
-  }
-  showAdminLinks(admin.loggedIn);
-  if (!admin.loggedIn) {
-    openLogin(admin.passwordSet);
+  if (!me || !me.user) {
+    toast(NO_USERS, true);
     return;
   }
   let s;
@@ -416,7 +431,6 @@ async function openSettings() {
   fields.retentionDays.value = s.retentionDays;
   fields.title.value = s.title;
   fields.autoUpdate.checked = s.autoUpdate;
-  fields.adminPassword.value = "";
   $("settingsError").hidden = true;
   $("testResult").textContent = "";
   $("testImg").hidden = true;
@@ -447,44 +461,69 @@ form.addEventListener("submit", async (ev) => {
   ev.preventDefault();
   try {
     await api("PUT", "/api/settings", formSettings());
-    if (fields.adminPassword.value) {
-      await api("PUT", "/api/admin/password", { password: fields.adminPassword.value });
-    }
     $("settingsDlg").close();
     toast("Definições guardadas");
     refreshStatus().then(refreshSnapshot);
   } catch (e) {
-    if (e.status === 401) {
-      // Session expired (or the app restarted after an update).
-      $("settingsDlg").close();
-      openLogin(true);
-      return;
-    }
     $("settingsError").textContent = e.message;
     $("settingsError").hidden = false;
   }
 });
 
-// ---------- Admin login ----------
+// ---------- Login & account ----------
+
+const ROLES = { admin: "Administrador", userManager: "Gestor de utilizadores", user: "Utilizador" };
+const role = () => me && me.user ? me.user.role : null;
+
+async function loadMe() {
+  try {
+    me = await api("GET", "/api/me");
+  } catch {
+    return; // offline: keep the current state
+  }
+  applyAccess();
+}
+
+// applyAccess shows the login page or the recorder, with the buttons the
+// user's role allows. While there are no users the recorder is open to all.
+function applyAccess() {
+  const loggedOut = me.authRequired && !me.user;
+  const wasLoggedOut = !$("loginView").hidden;
+  $("loginView").hidden = !loggedOut;
+  for (const id of ["app", "topbarActions"]) $(id).hidden = loggedOut;
+  document.querySelector("body > footer").hidden = loggedOut;
+  if (loggedOut) {
+    document.querySelectorAll("dialog[open]").forEach((d) => d.close());
+    // Nothing of the recorder stays on screen after logging out.
+    status = null;
+    recordings = [];
+    listKey = "";
+    $("recList").replaceChildren();
+    $("preview").hidden = true;
+    $("preview").removeAttribute("src");
+    if (!wasLoggedOut) loginForm.reset();
+    loginForm.elements.email.focus();
+    return;
+  }
+  $("settingsBtn").hidden = me.authRequired && role() !== "admin";
+  $("usersBtn").hidden = !(role() === "admin" || role() === "userManager");
+  $("accountBtn").hidden = !me.user;
+  $("logsBtn").hidden = role() !== "admin";
+  $("updateBtn").hidden = role() !== "admin";
+  if (wasLoggedOut) refreshStatus().then(refreshSnapshot);
+}
 
 const loginForm = $("loginForm");
 
-function openLogin(passwordSet) {
-  loginForm.reset();
-  const err = $("loginError");
-  err.hidden = passwordSet;
-  err.textContent = passwordSet ? "" :
-    "Ainda não foi definida a palavra-passe de administrador. Defina-a no PC: corra o instalador novamente ou execute \"simple-rtsp-recorder.exe set-admin-password\".";
-  loginForm.querySelector("[type=submit]").disabled = !passwordSet;
-  $("loginDlg").showModal();
-}
-
 loginForm.addEventListener("submit", async (ev) => {
   ev.preventDefault();
+  $("loginError").hidden = true;
   try {
-    await api("POST", "/api/admin/login", { password: loginForm.elements.password.value });
-    $("loginDlg").close();
-    openSettings();
+    me = await api("POST", "/api/login", {
+      email: loginForm.elements.email.value.trim(),
+      password: loginForm.elements.password.value,
+    });
+    applyAccess();
   } catch (e) {
     $("loginError").textContent = e.message;
     $("loginError").hidden = false;
@@ -492,14 +531,130 @@ loginForm.addEventListener("submit", async (ev) => {
   }
 });
 
+const accountForm = $("accountForm");
+
+$("accountBtn").addEventListener("click", () => {
+  accountForm.reset();
+  $("accountEmail").textContent = me.user.email;
+  $("accountRole").textContent = ROLES[me.user.role] || me.user.role;
+  $("accountError").hidden = true;
+  $("accountDlg").showModal();
+});
+
+accountForm.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    await api("PUT", "/api/me/password", {
+      currentPassword: accountForm.elements.currentPassword.value,
+      password: accountForm.elements.password.value,
+    });
+    $("accountDlg").close();
+    toast("Palavra-passe alterada");
+  } catch (e) {
+    $("accountError").textContent = e.message;
+    $("accountError").hidden = false;
+  }
+});
+
 $("logoutBtn").addEventListener("click", async () => {
   try {
-    await api("POST", "/api/admin/logout");
+    await api("POST", "/api/logout");
   } catch { /* the cookie is cleared either way */ }
-  $("settingsDlg").close();
-  showAdminLinks(false);
-  toast("Sessão terminada");
+  loadMe();
 });
+
+// ---------- Users ----------
+
+async function openUsers() {
+  let list;
+  try {
+    list = await api("GET", "/api/users");
+  } catch (e) {
+    toast(e.message, true);
+    return;
+  }
+  $("userList").replaceChildren(...list.map(renderUser));
+  if (!$("usersDlg").open) $("usersDlg").showModal();
+}
+
+function renderUser(u) {
+  const li = document.createElement("li");
+  li.className = "rec-item";
+  const info = document.createElement("div");
+  info.className = "rec-info";
+  const name = document.createElement("div");
+  name.className = "rec-name";
+  name.textContent = u.email;
+  const meta = document.createElement("div");
+  meta.className = "muted";
+  meta.textContent = (ROLES[u.role] || u.role) + (u.id === me.user.id ? " · a sua conta" : "");
+  info.append(name, meta);
+
+  // User managers can't touch admins (the server refuses it too).
+  const locked = u.role === "admin" && role() !== "admin";
+  const actions = document.createElement("div");
+  actions.className = "rec-actions";
+  const edit = iconButton("edit", "Editar", () => openUserForm(u));
+  const del = iconButton("trash", "Apagar", () => confirmAction("Apagar utilizador?", `${u.email} deixa de poder entrar.`, async () => {
+    try {
+      await api("DELETE", `/api/users/${encodeURIComponent(u.id)}`);
+      toast("Utilizador apagado");
+    } catch (e) {
+      toast(e.message, true);
+    }
+    openUsers();
+  }), "del");
+  edit.disabled = locked;
+  del.disabled = locked || u.id === me.user.id;
+  if (locked) edit.title = del.title = "Só um administrador pode alterar administradores";
+  actions.append(edit, del);
+  li.append(info, actions);
+  return li;
+}
+
+const userForm = $("userForm");
+let editingUser = null;
+
+function openUserForm(u) {
+  editingUser = u;
+  userForm.reset();
+  const select = userForm.elements.role;
+  const roles = role() === "admin" ? ["user", "userManager", "admin"] : ["user", "userManager"];
+  select.replaceChildren(...roles.map((r) => new Option(ROLES[r], r)));
+  select.value = u ? u.role : "user";
+  userForm.elements.email.value = u ? u.email : "";
+  userForm.elements.password.required = !u;
+  userForm.elements.password.placeholder = u ? "Deixe vazio para manter" : "";
+  $("userPasswordLabel").textContent = u ? "Nova palavra-passe" : "Palavra-passe (mínimo 8 caracteres)";
+  $("userDlgTitle").textContent = u ? "Editar utilizador" : "Novo utilizador";
+  $("userError").hidden = true;
+  $("userDlg").showModal();
+}
+
+userForm.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const body = {
+    email: userForm.elements.email.value.trim(),
+    role: userForm.elements.role.value,
+    password: userForm.elements.password.value,
+  };
+  try {
+    if (editingUser) await api("PUT", `/api/users/${encodeURIComponent(editingUser.id)}`, body);
+    else await api("POST", "/api/users", body);
+    $("userDlg").close();
+    toast(editingUser ? "Utilizador guardado" : "Utilizador criado");
+    // Editing yourself can change what you may see.
+    if (editingUser && editingUser.id === me.user.id) await loadMe();
+    if (role() === "admin" || role() === "userManager") openUsers();
+    else $("usersDlg").close();
+  } catch (e) {
+    $("userError").textContent = e.message;
+    $("userError").hidden = false;
+  }
+});
+
+$("usersBtn").addEventListener("click", openUsers);
+$("addUserBtn").addEventListener("click", () => openUserForm(null));
 
 $("testBtn").addEventListener("click", async () => {
   const btn = $("testBtn");
@@ -518,18 +673,7 @@ $("testBtn").addEventListener("click", async () => {
   }
 });
 
-// ---------- Logs & updates ----------
-
-// The logs are admin-only, so their link only shows while logged in.
-function showAdminLinks(loggedIn) {
-  $("logsBtn").hidden = !loggedIn;
-}
-
-async function refreshAdmin() {
-  try {
-    showAdminLinks((await api("GET", "/api/admin")).loggedIn);
-  } catch { /* keep the current state */ }
-}
+// ---------- Logs & updates (admin only) ----------
 
 $("logsBtn").addEventListener("click", async () => {
   try {
@@ -538,12 +682,6 @@ $("logsBtn").addEventListener("click", async () => {
     $("logsDlg").showModal();
     $("logs").scrollTop = $("logs").scrollHeight;
   } catch (e) {
-    if (e.status === 401) {
-      // Session expired (or the app restarted after an update).
-      showAdminLinks(false);
-      openLogin(true);
-      return;
-    }
     toast(e.message, true);
   }
 });
@@ -578,5 +716,4 @@ setInterval(renderTimer, 500);
 setInterval(() => { if (!document.hidden) refreshStatus(); }, STATUS_INTERVAL);
 setInterval(() => { if (!updating) refreshSnapshot(); }, SNAPSHOT_INTERVAL);
 setInterval(() => { if (!document.hidden) loadRecordings(); }, 60000);
-refreshStatus().then(refreshSnapshot);
-refreshAdmin();
+loadMe().then(() => refreshStatus()).then(refreshSnapshot);

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,9 +44,13 @@ type Config struct {
 	// FFmpegPath overrides the ffmpeg binary. Empty means ffmpeg(.exe) next to
 	// the executable, falling back to the one on PATH.
 	FFmpegPath string `json:"ffmpegPath,omitempty"`
-	// AdminPasswordHash protects the settings (see HashPassword). Set with
-	// `simple-rtsp-recorder.exe set-admin-password` or from the UI once logged in.
+	// AdminPasswordHash is the single admin password of 2.x up to 2.6. It is
+	// moved to an admin in Users when the file is loaded (see migrateUsers)
+	// and stays empty afterwards.
 	AdminPasswordHash string `json:"adminPasswordHash,omitempty"`
+	// Users can log in to the web page. While there are none, the recorder
+	// is open to everyone (as before 2.7) and nobody can reach the settings.
+	Users []User `json:"users,omitempty"`
 }
 
 // Default returns the settings used when no config file exists.
@@ -122,13 +127,14 @@ func (c *Config) Validate() error {
 	case strings.ContainsAny(c.Camera.Host, "/@ "):
 		return errors.New("endereço da câmara inválido (indique só o IP ou nome)")
 	}
-	return nil
+	return validateUsers(c.Users)
 }
 
 // Store gives concurrent access to the settings and persists changes. Edits
 // made to config.json by other processes (e.g. set-admin-password while the
 // service runs, or by hand) are picked up automatically.
 type Store struct {
+	editMu  sync.Mutex // serializes read-modify-write (see Edit)
 	mu      sync.Mutex
 	path    string
 	baseDir string
@@ -145,6 +151,12 @@ func Open(baseDir string) (*Store, error) {
 	switch {
 	case err == nil:
 		s.cfg, s.modTime = cfg, modTime
+		if migrateUsers(&cfg) {
+			if err := s.save(cfg); err != nil {
+				return nil, err
+			}
+			s.cfg = cfg
+		}
 		return s, nil
 	case errors.Is(err, os.ErrNotExist):
 		cfg, _, err := migrateLegacy(baseDir)
@@ -167,9 +179,14 @@ func (s *Store) Get() Config {
 		// new file is invalid (e.g. half-edited by hand).
 		if cfg, modTime, err := s.read(); err == nil {
 			s.cfg, s.modTime = cfg, modTime
+			if migrateUsers(&cfg) && s.save(cfg) == nil {
+				s.cfg = cfg
+			}
 		}
 	}
-	return s.cfg
+	cfg := s.cfg
+	cfg.Users = slices.Clone(cfg.Users) // callers may modify their copy
+	return cfg
 }
 
 func (s *Store) read() (Config, time.Time, error) {
@@ -203,6 +220,18 @@ func (s *Store) Update(cfg Config) error {
 	}
 	s.cfg = cfg
 	return nil
+}
+
+// Edit applies f to the current settings and saves the result, so that two
+// concurrent changes (e.g. two users added at once) don't overwrite each other.
+func (s *Store) Edit(f func(*Config) error) error {
+	s.editMu.Lock()
+	defer s.editMu.Unlock()
+	cfg := s.Get()
+	if err := f(&cfg); err != nil {
+		return err
+	}
+	return s.Update(cfg)
 }
 
 // BaseDir is the directory holding the executable, config and logs.

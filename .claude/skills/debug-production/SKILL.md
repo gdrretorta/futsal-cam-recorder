@@ -27,8 +27,9 @@ Cloudflare Access may block automated requests. If it does, ask the user to past
 | Recording plays badly or can't seek | Finalization failed. Look for "finalize failed" in the logs: the file stays fragmented MP4, which is still playable. |
 | Video has hiccups (freezes, jumps) | The `recording stats` log line written when each file is finalized: `fps` below the camera's setting or `gaps` > 0 means the camera skipped frames, usually because its Wi-Fi can't keep up with `kbps`. Fix it on the camera (lower bitrate, constant bitrate) or the Wi-Fi, not in ffmpeg. |
 | Update not applied | `update.state` is `waiting` while recording or finalizing (expected). On `error`, the message says why. A `dev` version never updates. |
-| "palavra-passe de administrador não definida" | No admin password yet. Run `install.ps1` again on the PC, or `set-admin-password` there. It can't be set remotely, by design. |
-| Admin locked out ("demasiadas tentativas") | 5 failed logins from that IP. Wait 15 minutes, or restart the service. |
+| "ainda não existe nenhum utilizador" | No user yet (the recorder is open to everyone until then). Run `install.ps1` again on the PC, or `add-user <email> admin` there. It can't be done remotely, by design. |
+| Forgotten password | Another admin (or a userManager, for non-admins) can set a new one in the users page. Otherwise, on the PC: `'<pw>' \| .\simple-rtsp-recorder.exe add-user <email> <role>`. |
+| Locked out ("demasiadas tentativas") | 5 failed logins from that IP. Wait 15 minutes, or restart the service. |
 | Public site looks unstyled or outdated, but `localhost:8080` on the PC is fine | Cloudflare is caching an old asset. Check that `index.html` references every asset with `?v=<hash>` (`internal/server/static.go`). Immediate workaround: Cloudflare dashboard → Caching → Purge Everything. |
 | Old version still shown after an update | The service did not restart. Check the recovery actions in `service.Install`. Running `install.ps1` again on the PC re-installs the service. |
 

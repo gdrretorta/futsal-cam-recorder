@@ -30,24 +30,24 @@ setsid /tmp/srr -dir $D > /tmp/srr.log 2>&1 &
 
 Alternatively, skip `prod.env` and PUT the settings (see below).
 
-The settings endpoints are admin-only. Set a password and log in with a cookie jar:
+Without users, the recorder endpoints are open and the settings are closed. Create an admin and log in with a cookie jar:
 
 ```bash
-echo 'test-admin-pw' | /tmp/srr -dir $D set-admin-password
-curl -s -c /tmp/cj -XPOST localhost:8080/api/admin/login -d '{"password":"test-admin-pw"}'
+echo 'test-admin-pw' | /tmp/srr -dir $D add-user admin@example.com admin
+curl -s -c /tmp/cj -XPOST localhost:8080/api/login -d '{"email":"admin@example.com","password":"test-admin-pw"}'
 ```
 
-Then pass `-b /tmp/cj` to the `/api/settings` calls.
+Then pass `-b /tmp/cj` to every API call (once a user exists, all of them need a login except `/recordings/{name}`).
 
 ## 3. Drive it
 
 ```bash
-curl -s localhost:8080/api/status
-curl -s -XPOST localhost:8080/api/recording/start; sleep 5
-curl -s -XPOST localhost:8080/api/recording/stop;  sleep 3
-curl -s localhost:8080/api/recordings
+curl -s -b /tmp/cj localhost:8080/api/status
+curl -s -b /tmp/cj -XPOST localhost:8080/api/recording/start; sleep 5
+curl -s -b /tmp/cj -XPOST localhost:8080/api/recording/stop;  sleep 3
+curl -s -b /tmp/cj localhost:8080/api/recordings
 ffprobe -v error -show_entries format=duration:stream=codec_name -of compact $D/recordings/*.mp4
-curl -s -o /tmp/snap.jpg -w '%{http_code}\n' localhost:8080/api/snapshot
+curl -s -b /tmp/cj -o /tmp/snap.jpg -w '%{http_code}\n' localhost:8080/api/snapshot
 curl -s -b /tmp/cj -XPUT localhost:8080/api/settings -H 'Content-Type: application/json' \
   -d '{"title":"Teste","camera":{"host":"127.0.0.1","port":8554,"path":"live1.sdp","user":""},"recordingsDir":"recordings","retentionDays":0,"autoUpdate":true}'
 ```

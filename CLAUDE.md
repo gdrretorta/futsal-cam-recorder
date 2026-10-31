@@ -17,7 +17,7 @@ can't easily get to the PC, so **auto-update is critical**: never break it.
 main.go                     commands (run/install/uninstall/version), wiring, restart after update
 internal/config             config.json load/save/validate; migration from 1.x prod.env
 internal/recorder           ffmpeg process: start/stop, reconnect, finalize (faststart remux), snapshot, list/prune
-internal/server             HTTP API + static files (endpoint list in the package doc); auth.go = admin login
+internal/server             HTTP API + static files (endpoint list in the package doc); auth.go = login, sessions, roles; users.go = user management
 internal/updater            GitHub release check → download + sha256 verify → swap exe when idle → restart
 internal/service            Windows service run/install/uninstall (stub on other OSes)
 internal/logging            slog → rotating file logs/recorder.log + stdout + in-memory tail for /api/logs
@@ -30,7 +30,7 @@ install.ps1                 one-time installer/upgrader (irm | iex)
 
 Runtime files in the install folder: `simple-rtsp-recorder.exe`, `ffmpeg.exe`,
 `config.json`, `recording.state` (present while a recording should be running, so it
-resumes after a restart), `session.key` (signs admin sessions), `logs/`, `recordings/`.
+resumes after a restart), `session.key` (signs login sessions), `logs/`, `recordings/`.
 
 ## Contracts that must not change
 
@@ -71,15 +71,20 @@ To run the app against the fake camera, see `.claude/skills/run-app/SKILL.md`.
 ## Adding things
 
 - **API endpoint**: register a handler in `server.Handler()`, add it to the package doc list, and add a test in `server_test.go`. Then call it from `web/app.js` through `api()`.
-- **Setting**: add the field to `config.Config` with a default and validation, then to `settingsDTO` and its `toDTO`/`apply` in `server.go`, then to the settings form in `index.html` and to `openSettings`/`formSettings` in `app.js`. Settings are admin-only automatically. `apply` must keep fields that aren't in the DTO, such as `adminPasswordHash`.
+- **Setting**: add the field to `config.Config` with a default and validation, then to `settingsDTO` and its `toDTO`/`apply` in `server.go`, then to the settings form in `index.html` and to `openSettings`/`formSettings` in `app.js`. Settings are admin-only automatically. `apply` must keep fields that aren't in the DTO, such as `users`.
 - **ffmpeg arguments**: `recordArgs` / `inputArgs` in `recorder.go`. Cover the change in `recorder_test.go`, which uses a real ffmpeg and a generated test file.
 
 ## Security model
 
-- **Admin-only: settings and logs.** `GET/PUT /api/settings`, `POST /api/settings/test`, `PUT /api/admin/password` and `GET /api/logs` are wrapped in `requireAdmin` (`internal/server/auth.go`). Every new endpoint that changes configuration or exposes secrets must be wrapped too. The "Logs" link in the footer only shows while logged in.
-- **Public: everything else** (record/stop, list/play/download/delete recordings, update check). Anyone who reaches https://futsal.retorta.com can use it, so Cloudflare Access is recommended in front of it.
-- The admin password is stored in `config.json` as a PBKDF2-SHA256 hash (`adminPasswordHash`). It is **never** set from the UI without being logged in, because the site is public and the first visitor would become admin. It is set on the PC, either by `install.ps1` (which prompts when none exists) or with `echo <pw> | simple-rtsp-recorder.exe set-admin-password`. Once logged in, it can be changed in the UI.
-- Sessions use an HMAC-signed cookie (`srr_admin`, HttpOnly, SameSite=Strict, Secure behind the tunnel). Sessions last 7 days and are renewed on every page load (`GET /api/admin`). The signing key is kept in `session.key` in the install folder, so sessions survive restarts and updates; delete it to log everyone out. Changing the password also invalidates other sessions.
-- Failed logins are locked out per IP: 5 failures in 15 minutes. The IP comes from `Cf-Connecting-Ip`, trusted only when the connection comes from loopback (cloudflared).
+- **Login with email and password; three roles** (`config.Role`): `admin` (everything), `userManager` (recorder + users page), `user` (recorder only). Users live in `config.json` (`users`: id, email, role, PBKDF2-SHA256 `passwordHash`).
+- **Every endpoint is wrapped in `s.require(level, h)`** (`internal/server/auth.go`): `accessRecorder` (any user), `accessUsers` (admin, userManager) or `accessAdmin` (settings, logs, update check). A new endpoint must pick one. The package doc in `server.go` lists the level of each endpoint. The UI hides what the role can't use, but the server is what enforces it.
+- **Public on purpose:** `GET /recordings/{name}`, so a recording's link can be shared without logging in (the owner asked for this). Also `GET /api/status`, but without access it returns only `{title, version, loginRequired}`: a page left open across an update must still see the new version and reload.
+- **No users = open mode.** While `users` is empty, `accessRecorder` endpoints are open to everyone (as before 2.7) and nothing else is reachable. That way an automatic update can never lock the owner out of the PC.
+- **Upgrade from ≤ 2.6:** the old `adminPasswordHash` becomes an admin user (`config.MigratedAdminEmail`, same password) when `config.json` is loaded (`migrateUsers`), and is then cleared.
+- **The first admin is never created from the UI**, because the site is public and the first visitor would become admin. It is created on the PC, either by `install.ps1` (which asks for email and password when there is no admin) or with `echo <pw> | simple-rtsp-recorder.exe add-user <email> admin`. `set-admin-password` still works (it sets the first admin's password).
+- **User management rules** (`canManage` in `users.go`, plus `config.Store`): a userManager can't create, edit, promote to or delete admins. Nobody can delete their own account. The last admin can't be deleted or demoted. Changing your own password needs the current one.
+- Sessions use an HMAC-signed cookie (`srr_session` = `<user id>.<expiry>.<sig>`, HttpOnly, SameSite=Strict, Secure behind the tunnel). The signature covers the user's password hash, and the user is looked up on every request: a password change logs that user out elsewhere, and a role change or deletion applies at once. Sessions last 7 days and are renewed on every page load (`GET /api/me`). The signing key is kept in `session.key` in the install folder, so sessions survive restarts and updates; delete it to log everyone out.
+- Failed logins are locked out per IP: 5 failures in 15 minutes. The IP comes from `Cf-Connecting-Ip`, trusted only when the connection comes from loopback (cloudflared). An unknown email takes as long as a wrong password (`dummyHash`).
+- Changes to users go through `Store.Edit` (read-modify-write under a lock), so concurrent edits don't overwrite each other. `PUT /api/settings` uses it too.
 - `config.Store` reloads `config.json` when the file changes on disk, so edits from the CLI or by hand apply without restarting the service.
-- Never return the camera password or the admin hash from the API.
+- Never return the camera password or a password hash from the API.

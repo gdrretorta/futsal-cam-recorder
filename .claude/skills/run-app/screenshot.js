@@ -1,5 +1,7 @@
 // Screenshots of the running app (http://localhost:8080) in light/desktop and
 // dark/phone, plus the settings dialog. Prints page errors per viewport.
+// Logs in when the login page shows, as SRR_EMAIL / SRR_PASSWORD (defaults:
+// the admin created in SKILL.md).
 // Usage: NODE_PATH=$(npm root -g) node screenshot.js <out-dir> [url]
 const { chromium } = require("playwright");
 
@@ -15,8 +17,15 @@ const { chromium } = require("playwright");
     const page = await browser.newPage({ viewport, colorScheme });
     const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
-    page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+    // A 401 before logging in is expected.
+    page.on("console", (m) => m.type() === "error" && !m.text().includes("401") && errors.push(m.text()));
     await page.goto(url);
+    await page.waitForTimeout(500);
+    if (await page.isVisible("#loginView")) {
+      await page.fill("#loginForm [name=email]", process.env.SRR_EMAIL || "admin@example.com");
+      await page.fill("#loginForm [name=password]", process.env.SRR_PASSWORD || "test-admin-pw");
+      await page.click("#loginForm [type=submit]");
+    }
     await page.waitForTimeout(3500); // status poll + snapshot
     await page.screenshot({ path: `${out}/${name}.png`, fullPage: true });
     if (name === "desktop-light") {

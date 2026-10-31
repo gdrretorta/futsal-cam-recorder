@@ -5,8 +5,11 @@
 //	simple-rtsp-recorder.exe install    install/replace the Windows service and start it
 //	simple-rtsp-recorder.exe uninstall  stop and remove the Windows service
 //	simple-rtsp-recorder.exe version    print the version
-//	simple-rtsp-recorder.exe set-admin-password   read the settings password from stdin
-//	simple-rtsp-recorder.exe has-admin-password   exit code 0 if one is set, 1 if not
+//	simple-rtsp-recorder.exe add-user <email> <role>   create a user, or set its role and
+//	                                                   password; password read from stdin;
+//	                                                   role is admin, userManager or user
+//	simple-rtsp-recorder.exe set-admin-password   set the first admin's password (stdin)
+//	simple-rtsp-recorder.exe has-admin-password   exit code 0 if an admin exists, 1 if not
 //
 // Flags: -dir <path> uses another base directory (config, logs) — handy for
 // development, where the binary lives in a temp folder.
@@ -84,6 +87,8 @@ func main() {
 		}
 	case "version":
 		fmt.Println(version)
+	case "add-user":
+		err = addUser(*dir, flag.Arg(1), flag.Arg(2))
 	case "set-admin-password":
 		err = setAdminPassword(*dir)
 	case "has-admin-password":
@@ -91,11 +96,11 @@ func main() {
 		if oerr != nil {
 			fatal(oerr)
 		}
-		if store.Get().AdminPasswordHash == "" {
+		if !store.HasAdmin() {
 			os.Exit(1)
 		}
 	default:
-		err = fmt.Errorf("comando desconhecido %q (use install, uninstall, set-admin-password, version ou nada para correr)", cmd)
+		err = fmt.Errorf("comando desconhecido %q (use install, uninstall, add-user, set-admin-password, version ou nada para correr)", cmd)
 	}
 	if err != nil {
 		fatal(err)
@@ -197,19 +202,51 @@ func findFFmpeg(configured, exeDir string) string {
 	return name
 }
 
-// setAdminPassword reads the new password from stdin (one line), so it never
-// appears in the process list. A running service picks it up immediately.
+// readPassword reads one line from stdin, so the password never appears in
+// the process list. A running service picks up the change immediately.
+func readPassword(prompt string) (string, error) {
+	fmt.Fprint(os.Stderr, prompt)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && line == "" {
+		return "", errors.New("nenhuma palavra-passe recebida")
+	}
+	return strings.TrimRight(line, "\r\n"), nil
+}
+
+func addUser(dir, email, role string) error {
+	if email == "" || role == "" {
+		return errors.New("uso: simple-rtsp-recorder.exe add-user <email> <admin|userManager|user> (palavra-passe no stdin)")
+	}
+	r, err := config.ParseRole(role)
+	if err != nil {
+		return err
+	}
+	store, err := config.Open(dir)
+	if err != nil {
+		return err
+	}
+	pw, err := readPassword("Palavra-passe de " + email + ": ")
+	if err != nil {
+		return err
+	}
+	u, err := store.SetUser(email, r, pw)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "\nUtilizador %s (%s) guardado.\n", u.Email, u.Role)
+	return nil
+}
+
 func setAdminPassword(dir string) error {
 	store, err := config.Open(dir)
 	if err != nil {
 		return err
 	}
-	fmt.Fprint(os.Stderr, "Nova palavra-passe de administrador: ")
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-	if err != nil && line == "" {
-		return errors.New("nenhuma palavra-passe recebida")
+	pw, err := readPassword("Nova palavra-passe de administrador: ")
+	if err != nil {
+		return err
 	}
-	if err := store.SetAdminPassword(strings.TrimRight(line, "\r\n")); err != nil {
+	if err := store.SetAdminPassword(pw); err != nil {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "\nPalavra-passe de administrador guardada.")

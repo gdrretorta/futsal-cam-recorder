@@ -14,15 +14,31 @@
       <img src="icon.svg" alt="" width="28" height="28">
       <h1 id="title">Simple RTSP Recorder</h1>
     </div>
-    <div class="topbar-actions">
+    <div id="topbarActions" class="topbar-actions">
       <span id="pill" class="pill">—</span>
-      <button id="settingsBtn" class="icon-btn" title="Definições" aria-label="Definições">
+      <button id="usersBtn" class="icon-btn" title="Utilizadores" aria-label="Utilizadores" hidden>
+        <svg viewBox="0 0 24 24"><path d="M16 20v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 18.5V20"/><circle cx="10" cy="8" r="3.5"/><path d="M20 20v-1.5a3.5 3.5 0 0 0-2.5-3.35M15.5 4.65a3.5 3.5 0 0 1 0 6.7"/></svg>
+      </button>
+      <button id="accountBtn" class="icon-btn" title="A minha conta" aria-label="A minha conta" hidden>
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20.5a8 8 0 0 1 16 0"/></svg>
+      </button>
+      <button id="settingsBtn" class="icon-btn" title="Definições" aria-label="Definições" hidden>
         <svg viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
       </button>
     </div>
   </header>
 
-  <main class="layout">
+  <main id="loginView" class="login-view" hidden>
+    <form id="loginForm" class="card login-card">
+      <h2>Iniciar sessão</h2>
+      <label>Email<input name="email" type="email" autocomplete="username" required></label>
+      <label>Palavra-passe<input name="password" type="password" autocomplete="current-password" required></label>
+      <p id="loginError" class="state-error" hidden></p>
+      <button type="submit" class="btn primary">Entrar</button>
+    </form>
+  </main>
+
+  <main id="app" class="layout">
     <section class="card camera">
       <div class="preview">
         <img id="preview" alt="Imagem da câmara" hidden>
@@ -66,7 +82,7 @@
     <div class="footer-meta">
       <span id="version" class="muted"></span>
       <span id="updateText" class="muted"></span>
-      <button id="updateBtn" class="link-btn">Verificar atualizações</button>
+      <button id="updateBtn" class="link-btn" hidden>Verificar atualizações</button>
       <button id="logsBtn" class="link-btn" hidden>Logs</button>
     </div>
   </footer>
@@ -78,7 +94,7 @@
 
   <dialog id="confirmDlg" class="dlg">
     <form method="dialog">
-      <h3>Apagar gravação?</h3>
+      <h3 id="confirmTitle"></h3>
       <p id="confirmText" class="muted"></p>
       <div class="dlg-actions">
         <button value="cancel" class="btn">Cancelar</button>
@@ -117,11 +133,6 @@
         <label>Título<input name="title"></label>
         <label class="check"><input name="autoUpdate" type="checkbox"> Atualizar automaticamente (só quando não há gravações)</label>
       </fieldset>
-      <fieldset>
-        <legend>Administração</legend>
-        <label>Nova palavra-passe de administrador (deixe vazio para manter)<input name="adminPassword" type="password" autocomplete="new-password" minlength="8"></label>
-        <div><button type="button" id="logoutBtn" class="link-btn">Terminar sessão</button></div>
-      </fieldset>
       <p id="settingsError" class="state-error" hidden></p>
       <div class="dlg-actions">
         <button type="button" class="btn" data-close>Cancelar</button>
@@ -130,15 +141,43 @@
     </form>
   </dialog>
 
-  <dialog id="loginDlg" class="dlg narrow">
-    <form id="loginForm">
-      <div class="dlg-head"><h3>Administrador</h3><button type="button" class="icon-btn" data-close aria-label="Fechar">✕</button></div>
-      <p class="muted">As definições só estão disponíveis para o administrador.</p>
-      <label>Palavra-passe<input name="password" type="password" autocomplete="current-password" required></label>
-      <p id="loginError" class="state-error" hidden></p>
+  <dialog id="accountDlg" class="dlg narrow">
+    <form id="accountForm">
+      <div class="dlg-head"><h3>A minha conta</h3><button type="button" class="icon-btn" data-close aria-label="Fechar">✕</button></div>
+      <p class="muted"><span id="accountEmail"></span> · <span id="accountRole"></span></p>
+      <fieldset>
+        <legend>Mudar palavra-passe</legend>
+        <label>Palavra-passe atual<input name="currentPassword" type="password" autocomplete="current-password" required></label>
+        <label>Nova palavra-passe (mínimo 8 caracteres)<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+      </fieldset>
+      <p id="accountError" class="state-error" hidden></p>
+      <div class="dlg-actions spread">
+        <button type="button" id="logoutBtn" class="btn">Terminar sessão</button>
+        <button type="submit" class="btn primary">Mudar palavra-passe</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="usersDlg" class="dlg">
+    <div class="dlg-head"><h3>Utilizadores</h3><button class="icon-btn" data-close aria-label="Fechar">✕</button></div>
+    <ul id="userList" class="rec-list"></ul>
+    <div class="dlg-actions">
+      <button id="addUserBtn" class="btn primary">Adicionar utilizador</button>
+    </div>
+  </dialog>
+
+  <dialog id="userDlg" class="dlg narrow">
+    <form id="userForm">
+      <div class="dlg-head"><h3 id="userDlgTitle"></h3><button type="button" class="icon-btn" data-close aria-label="Fechar">✕</button></div>
+      <fieldset>
+        <label>Email<input name="email" type="email" autocomplete="off" required></label>
+        <label>Perfil<select name="role"></select></label>
+        <label><span id="userPasswordLabel"></span><input name="password" type="password" autocomplete="new-password" minlength="8"></label>
+      </fieldset>
+      <p id="userError" class="state-error" hidden></p>
       <div class="dlg-actions">
         <button type="button" class="btn" data-close>Cancelar</button>
-        <button type="submit" class="btn primary">Entrar</button>
+        <button type="submit" class="btn primary">Guardar</button>
       </div>
     </form>
   </dialog>

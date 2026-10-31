@@ -111,18 +111,18 @@ func TestStorePicksUpExternalChanges(t *testing.T) {
 	}
 	// Make sure the next write gets a different mtime on coarse filesystems.
 	time.Sleep(20 * time.Millisecond)
-	cli, _ := Open(dir) // e.g. set-admin-password from the command line
-	if err := cli.SetAdminPassword("from the cli!"); err != nil {
+	cli, _ := Open(dir) // e.g. add-user from the command line
+	if _, err := cli.SetUser("a@b.pt", RoleAdmin, "from the cli!"); err != nil {
 		t.Fatal(err)
 	}
-	if err := running.CheckAdminPassword("from the cli!"); err != nil {
+	if _, err := running.Authenticate("a@b.pt", "from the cli!"); err != nil {
 		t.Fatalf("running store did not reload: %v", err)
 	}
-	// A later save by the running store must keep the new hash.
+	// A later save by the running store must keep the new user.
 	cfg := running.Get()
 	cfg.Title = "x"
 	running.Update(cfg)
-	if err := cli.CheckAdminPassword("from the cli!"); err != nil {
-		t.Fatalf("hash lost after update: %v", err)
+	if _, err := cli.Authenticate("a@b.pt", "from the cli!"); err != nil {
+		t.Fatalf("user lost after update: %v", err)
 	}
 }
