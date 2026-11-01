@@ -1,7 +1,8 @@
 // Package server exposes the web UI and its JSON API.
 //
 // Access: [user] any logged-in user, [users] admins and user managers,
-// [admin] admins only. While no user exists, [user] endpoints are open to
+// [admin] admins only. A browser on the PC itself (http://localhost:8080) is
+// an admin without logging in (see isLocal). While no user exists, [user] endpoints are open to
 // everyone (see accessRecorder). A user whose password was chosen by someone
 // else can only use /api/me, /api/me/password and /api/logout until they
 // change it (403 otherwise). /recordings/{name} is always public, so a
@@ -62,6 +63,9 @@ type Server struct {
 	Updater  *updater.Updater
 	Log      *logging.Logger
 	Static   fs.FS
+	// TrustLocal makes a browser on the PC itself an admin without a login
+	// (see isLocal). Off in tests, where every request comes from loopback.
+	TrustLocal bool
 
 	auth *auth
 
@@ -116,7 +120,7 @@ type disk struct {
 // access it reveals nothing but the title and version.
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	cfg := s.Store.Get()
-	if u, ok := s.auth.user(r, s.Store); (!ok || u.MustChangePassword) && len(cfg.Users) > 0 {
+	if u, ok := s.currentUser(r); (!ok || u.MustChangePassword) && len(cfg.Users) > 0 {
 		writeJSON(w, http.StatusOK, map[string]any{"title": cfg.Title, "version": s.Version, "loginRequired": true})
 		return
 	}

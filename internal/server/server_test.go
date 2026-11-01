@@ -644,3 +644,69 @@ func TestNotifySettings(t *testing.T) {
 		}
 	}
 }
+
+func TestIsLocal(t *testing.T) {
+	for _, c := range []struct {
+		name, method, remote, host string
+		headers                    map[string]string
+		want                       bool
+	}{
+		{"browser on the PC", "GET", "127.0.0.1:5000", "localhost:8080", nil, true},
+		{"by IP", "GET", "127.0.0.1:5000", "127.0.0.1:8080", nil, true},
+		{"IPv6", "GET", "[::1]:5000", "[::1]:8080", nil, true},
+		{"same-page change", "POST", "127.0.0.1:5000", "localhost:8080", map[string]string{"Origin": "http://localhost:8080", "Sec-Fetch-Site": "same-origin"}, true},
+		{"curl on the PC", "POST", "127.0.0.1:5000", "localhost:8080", nil, true},
+		// cloudflared also connects from loopback.
+		{"through the tunnel", "GET", "127.0.0.1:5000", "futsal.retorta.com", map[string]string{"Cf-Connecting-Ip": "1.2.3.4"}, false},
+		{"tunnel with a localhost Host", "GET", "127.0.0.1:5000", "localhost:8080", map[string]string{"Cf-Connecting-Ip": "1.2.3.4"}, false},
+		{"tunnel without Cf-Connecting-Ip", "GET", "127.0.0.1:5000", "futsal.retorta.com", nil, false},
+		{"tunnel, Cf-Ray only", "GET", "127.0.0.1:5000", "localhost:8080", map[string]string{"Cf-Ray": "abc"}, false},
+		{"LAN", "GET", "192.168.1.20:5000", "192.168.1.10:8080", nil, false},
+		{"DNS rebinding", "GET", "127.0.0.1:5000", "evil.example.com", nil, false},
+		{"other site's form (CSRF)", "POST", "127.0.0.1:5000", "localhost:8080", map[string]string{"Origin": "https://evil.example.com"}, false},
+		{"other site, no Origin", "POST", "127.0.0.1:5000", "localhost:8080", map[string]string{"Sec-Fetch-Site": "cross-site"}, false},
+	} {
+		r := httptest.NewRequest(c.method, "/api/settings", nil)
+		r.RemoteAddr, r.Host = c.remote, c.host
+		for k, v := range c.headers {
+			r.Header.Set(k, v)
+		}
+		if got := isLocal(r); got != c.want {
+			t.Errorf("%s: isLocal = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// On the PC itself (TrustLocal), the browser is an admin without logging in.
+func TestLocalAccess(t *testing.T) {
+	_, store := newTestServer(t)
+	s := &Server{Version: "test", Store: store, Log: logging.Discard(), Static: web.FS, TrustLocal: true}
+	local := httptest.NewServer(s.Handler())
+	t.Cleanup(local.Close)
+
+	if resp, body := do(t, "GET", local.URL+"/api/settings", ""); resp.StatusCode != 200 {
+		t.Fatalf("settings on the PC = %d %s", resp.StatusCode, body)
+	}
+	if _, body := do(t, "GET", local.URL+"/api/me", ""); !strings.Contains(body, `"local":true`) || !strings.Contains(body, `"role":"admin"`) {
+		t.Fatalf("me on the PC = %s", body)
+	}
+	// The same request through the tunnel needs a login.
+	req, _ := http.NewRequest("GET", local.URL+"/api/settings", nil)
+	req.Header.Set("Cf-Connecting-Ip", "1.2.3.4")
+	if resp, _ := http.DefaultClient.Do(req); resp.StatusCode != 401 {
+		t.Errorf("through the tunnel = %d, want 401", resp.StatusCode)
+	}
+	// Another web page open on the PC can't make changes.
+	req, _ = http.NewRequest("POST", local.URL+"/api/users", strings.NewReader(`{"email":"evil@x.pt","role":"admin","password":"password1"}`))
+	req.Header.Set("Origin", "https://evil.example.com")
+	if resp, _ := http.DefaultClient.Do(req); resp.StatusCode != 401 {
+		t.Errorf("cross-site change = %d, want 401", resp.StatusCode)
+	}
+	if resp, body := do(t, "PUT", local.URL+"/api/me/password", `{"currentPassword":"x","password":"password1"}`); resp.StatusCode != 400 {
+		t.Errorf("me/password on the PC = %d %s, want 400", resp.StatusCode, body)
+	}
+	// It can manage users like an admin.
+	if resp, body := do(t, "POST", local.URL+"/api/users", `{"email":"new@x.pt","role":"userManager","password":"password1"}`); resp.StatusCode != 201 {
+		t.Errorf("create user on the PC = %d %s", resp.StatusCode, body)
+	}
+}

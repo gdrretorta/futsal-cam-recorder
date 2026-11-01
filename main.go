@@ -139,7 +139,7 @@ func run(ctx context.Context, exe, baseDir string) (restart bool, err error) {
 	})
 	upd.CleanupOld()
 
-	srv := &server.Server{Version: version, FFmpeg: ffmpeg, Store: store, Recorder: rec, Updater: upd, Log: log, Static: web.FS}
+	srv := &server.Server{Version: version, FFmpeg: ffmpeg, Store: store, Recorder: rec, Updater: upd, Log: log, Static: web.FS, TrustLocal: true}
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	ln, err := net.Listen("tcp", net.JoinHostPort("", strconv.Itoa(cfg.Port)))
 	if err != nil {

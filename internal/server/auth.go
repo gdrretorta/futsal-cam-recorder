@@ -204,7 +204,7 @@ type userKey struct{}
 // if any, with userFrom.
 func (s *Server) require(level access, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		u, ok := s.auth.user(r, s.Store)
+		u, ok := s.currentUser(r)
 		switch {
 		case !ok && level == accessRecorder && !s.Store.HasUsers():
 			h(w, r)
@@ -218,6 +218,52 @@ func (s *Server) require(level access, h http.HandlerFunc) http.HandlerFunc {
 			h(w, r.WithContext(context.WithValue(r.Context(), userKey{}, u)))
 		}
 	}
+}
+
+// localUser is whoever uses the browser on the PC itself: an admin without a
+// login (the owner asked for this; whoever sits at the PC owns it anyway).
+var localUser = config.User{ID: "local", Email: "este PC", Role: config.RoleAdmin}
+
+// currentUser is the local admin on the PC itself, or the user of the session.
+func (s *Server) currentUser(r *http.Request) (config.User, bool) {
+	if s.TrustLocal && isLocal(r) {
+		return localUser, true
+	}
+	return s.auth.user(r, s.Store)
+}
+
+// isLocal reports whether a request comes from a browser on the PC itself.
+// cloudflared runs on the same PC, so every request from the internet also
+// arrives from loopback: the Cloudflare headers and the Host tell them apart
+// (Cloudflare always adds Cf-Connecting-Ip, and the Host is the public name).
+// A web page open on the PC could also send requests to localhost (CSRF), so
+// a change needs the page's own Origin.
+func isLocal(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if ip := net.ParseIP(host); err != nil || ip == nil || !ip.IsLoopback() {
+		return false
+	}
+	for _, h := range []string{"Cf-Connecting-Ip", "Cf-Ray", "Cdn-Loop", "X-Forwarded-For", "X-Forwarded-Host"} {
+		if r.Header.Get(h) != "" {
+			return false
+		}
+	}
+	name := r.Host
+	if h, _, err := net.SplitHostPort(r.Host); err == nil {
+		name = h
+	}
+	if ip := net.ParseIP(strings.Trim(name, "[]")); name != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return false // also stops DNS rebinding
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		if o := r.Header.Get("Origin"); o != "" && o != "http://"+r.Host {
+			return false
+		}
+		if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" {
+			return false
+		}
+	}
+	return true
 }
 
 func userFrom(r *http.Request) (config.User, bool) {
@@ -239,11 +285,16 @@ type meDTO struct {
 	// AuthRequired is false while there are no users: the recorder is open.
 	AuthRequired bool     `json:"authRequired"`
 	User         *userDTO `json:"user"`
+	// Local is true on the PC itself (see isLocal): admin without a login.
+	Local bool `json:"local,omitempty"`
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	resp := meDTO{AuthRequired: s.Store.HasUsers()}
-	if u, ok := s.auth.user(r, s.Store); ok {
+	if s.TrustLocal && isLocal(r) {
+		d := toUserDTO(localUser)
+		resp.User, resp.Local = &d, true
+	} else if u, ok := s.auth.user(r, s.Store); ok {
 		// The page asks on every load: renewing here keeps someone who uses
 		// the site at least once a week logged in.
 		s.auth.setSession(w, r, u)
@@ -295,6 +346,10 @@ func (s *Server) changeOwnPassword(w http.ResponseWriter, r *http.Request) {
 	u, ok := userFrom(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, errLoginRequired)
+		return
+	}
+	if u.ID == localUser.ID {
+		writeError(w, http.StatusBadRequest, errors.New("no próprio PC não há conta: a palavra-passe muda-se na página Utilizadores"))
 		return
 	}
 	var body struct {

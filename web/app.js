@@ -546,7 +546,8 @@ function applyAccess() {
   }
   $("settingsBtn").hidden = me.authRequired && role() !== "admin";
   $("usersBtn").hidden = !(role() === "admin" || role() === "userManager");
-  $("accountBtn").hidden = !me.user;
+  // On the PC itself there is no account (admin without a login).
+  $("accountBtn").hidden = !me.user || !!me.local;
   $("logsBtn").hidden = role() !== "admin";
   $("updateBtn").hidden = role() !== "admin";
   if (wasLoggedOut) refreshStatus().then(refreshSnapshot);
