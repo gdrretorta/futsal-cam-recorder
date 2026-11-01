@@ -20,6 +20,7 @@ internal/recorder           ffmpeg process: start/stop, reconnect, finalize (fas
 internal/server             HTTP API + static files (endpoint list in the package doc); auth.go = login, sessions, roles; users.go = user management
 internal/updater            GitHub release check → download + sha256 verify → swap exe when idle → restart
 internal/service            Windows service run/install/uninstall (stub on other OSes)
+internal/tunnel             keeps cloudflared (the tunnel connector, a Windows service) up to date, with rollback
 internal/notify             emails to the admins through the Resend API; Watcher = long-recording alert
 internal/logging            slog → rotating file logs/recorder.log + stdout + in-memory tail for /api/logs
 internal/sysinfo            free disk space (windows / unix)
@@ -74,6 +75,7 @@ To run the app against the fake camera, see `.claude/skills/run-app/SKILL.md`.
 - **API endpoint**: register a handler in `server.Handler()`, add it to the package doc list, and add a test in `server_test.go`. Then call it from `web/app.js` through `api()`.
 - **Setting**: add the field to `config.Config` with a default and validation, then to `settingsDTO` and its `toDTO`/`apply` in `server.go`, then to the settings form in `index.html` and to `openSettings`/`formSettings` in `app.js`. Settings are admin-only automatically. `apply` must keep fields that aren't in the DTO, such as `users`.
 - **Email alert**: build the message in `internal/notify` and send it with `notify.Send` to `notify.AdminEmails(cfg)`. Emails go out through the Resend HTTP API (`api.resend.com`), configured in the settings (`notify`). The long-recording alert (`notify.Watcher`, started in `main.go`) checks every minute and emails the admins when a recording reaches `notify.longRecordingHours`, then every hour; a failure is retried after 10 minutes. It counts from `Recorder.Status().StartedAt`, which survives a restart (the start time is kept in `recording.state`).
+- **cloudflared updates** (`internal/tunnel`): cloudflared doesn't update itself on Windows, and a broken tunnel cuts the owner off the PC, so the flow is defensive: check the public site (`notify.siteUrl` + `/api/status` must answer with this app's version, proving the path Cloudflare → tunnel → this PC) **before** touching anything; download `cloudflared-windows-amd64.exe` and verify the sha256 (GitHub asset `digest`, else the release notes; none = no install); check the new exe reports the expected version; wait for `TryLock` (no recording, blocks new ones); stop the service, keep `.old`, swap, start; check the public site for 2 minutes, else restore `.old`. Weekly (Monday 04:00–05:00, `tunnel.autoUpdate`) and from the "Atualizar agora" button. The service's command line holds the tunnel token: never log it (`ExeFromCommandLine` keeps only the path). Never weaken the pre-check, the checksum or the rollback.
 - **ffmpeg arguments**: `recordArgs` / `inputArgs` in `recorder.go`. Cover the change in `recorder_test.go`, which uses a real ffmpeg and a generated test file.
 
 ## Security model

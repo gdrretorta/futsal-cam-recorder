@@ -439,10 +439,14 @@ async function openSettings() {
   fields.notifyKey.placeholder = s.notify.hasApiKey ? "•••••• (inalterada)" : "re_…";
   fields.notifyKey.dataset.touched = "";
   $("notifyTestResult").textContent = "";
+  fields.tunnelAuto.checked = s.tunnel.autoUpdate;
+  $("tunnelInfo").textContent = "";
+  $("tunnelState").hidden = true;
   $("settingsError").hidden = true;
   $("testResult").textContent = "";
   $("testImg").hidden = true;
   $("settingsDlg").showModal();
+  loadTunnel();
 }
 
 fields.password.addEventListener("input", () => (fields.password.dataset.touched = "1"));
@@ -463,6 +467,7 @@ function formSettings() {
     recordingsDir: fields.recordingsDir.value.trim(),
     retentionDays: Number(fields.retentionDays.value) || 0,
     autoUpdate: fields.autoUpdate.checked,
+    tunnel: { autoUpdate: fields.tunnelAuto.checked },
     notify: {
       longRecordingHours: Number(fields.notifyHours.value) || 0,
       from: fields.notifyFrom.value.trim(),
@@ -472,6 +477,56 @@ function formSettings() {
     },
   };
 }
+
+// ---------- cloudflared (Cloudflare Tunnel) ----------
+
+const TUNNEL_STATES = {
+  checking: "A verificar versões…",
+  downloading: "A transferir a nova versão…",
+  waiting: "À espera que a gravação termine…",
+  updating: "A instalar: o site fica indisponível uns segundos…",
+  verifying: "A confirmar que o túnel voltou…",
+  rollingBack: "O túnel não voltou: a repor a versão anterior…",
+};
+
+async function loadTunnel() {
+  clearTimeout(loadTunnel.t);
+  if (!$("settingsDlg").open) return;
+  let t;
+  try {
+    t = await api("GET", "/api/tunnel");
+  } catch {
+    // During the swap this very page loses its connection for a moment.
+    $("tunnelState").textContent = "Sem ligação ao site (normal durante a atualização)…";
+    $("tunnelState").hidden = false;
+    loadTunnel.t = setTimeout(loadTunnel, 3000);
+    return;
+  }
+  const busy = t.state in TUNNEL_STATES;
+  if (t.state === "unsupported") {
+    $("tunnelInfo").textContent = "Só disponível no PC Windows onde corre o cloudflared.";
+  } else {
+    const newer = t.latest && t.installed && t.latest !== t.installed ? ` · disponível: ${t.latest}` : "";
+    $("tunnelInfo").textContent = t.installed
+      ? `cloudflared instalado: ${t.installed}${newer}`
+      : "A procurar o cloudflared…";
+  }
+  const text = busy ? TUNNEL_STATES[t.state] : (t.message ? "Última atualização: " + t.message : "");
+  $("tunnelState").textContent = text;
+  $("tunnelState").hidden = !text;
+  $("tunnelState").classList.toggle("state-error", !busy && !!t.failed);
+  $("tunnelUpdateBtn").disabled = busy || t.state === "unsupported";
+  loadTunnel.t = setTimeout(loadTunnel, busy || !t.installed ? 3000 : 30000);
+}
+
+$("tunnelUpdateBtn").addEventListener("click", async () => {
+  try {
+    await api("POST", "/api/tunnel/update");
+  } catch (e) {
+    toast(e.message, true);
+  }
+  loadTunnel();
+});
 
 $("notifyTestBtn").addEventListener("click", async () => {
   const btn = $("notifyTestBtn");

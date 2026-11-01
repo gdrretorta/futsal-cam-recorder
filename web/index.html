@@ -148,16 +148,26 @@
         <label>Avisar quando uma gravação passa de (horas, 0 = nunca)<input name="notifyHours" type="number" min="0" max="48" value="3"></label>
         <label>API key da Resend<input name="notifyKey" type="password" autocomplete="off" placeholder="re_…"></label>
         <label>Remetente (num domínio verificado na Resend)<input name="notifyFrom" placeholder="Gravador &lt;gravador@retorta.com&gt;"></label>
-        <label>Endereço do site (para o link nos emails)<input name="notifySite" type="url" placeholder="https://futsal.retorta.com"></label>
         <div class="test-row">
           <button type="button" id="notifyTestBtn" class="btn">Enviar email de teste</button>
           <span id="notifyTestResult" class="muted"></span>
         </div>
       </fieldset>
       <fieldset>
+        <legend>Túnel Cloudflare</legend>
+        <p id="tunnelInfo" class="muted hint"></p>
+        <p id="tunnelState" class="muted hint" hidden></p>
+        <label class="check"><input name="tunnelAuto" type="checkbox"> Atualizar o cloudflared automaticamente (às segundas-feiras às 4h, depois de terminarem as gravações)</label>
+        <div class="test-row">
+          <button type="button" id="tunnelUpdateBtn" class="btn">Atualizar agora</button>
+          <span class="muted">Espera pelo fim das gravações. O site fica indisponível uns segundos.</span>
+        </div>
+      </fieldset>
+      <fieldset>
         <legend>Geral</legend>
         <label>Título<input name="title"></label>
-        <label class="check"><input name="autoUpdate" type="checkbox"> Atualizar automaticamente (só quando não há gravações)</label>
+        <label>Endereço público do site (links nos emails e confirmação do túnel)<input name="notifySite" type="url" placeholder="https://futsal.retorta.com"></label>
+        <label class="check"><input name="autoUpdate" type="checkbox"> Atualizar o gravador automaticamente (só quando não há gravações)</label>
       </fieldset>
       <p id="settingsError" class="state-error" hidden></p>
       <div class="dlg-actions">

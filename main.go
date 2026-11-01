@@ -39,6 +39,7 @@ import (
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/recorder"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/server"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/service"
+	"github.com/joaoopereira/simple-rtsp-recorder/internal/tunnel"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/updater"
 	"github.com/joaoopereira/simple-rtsp-recorder/web"
 )
@@ -139,7 +140,17 @@ func run(ctx context.Context, exe, baseDir string) (restart bool, err error) {
 	})
 	upd.CleanupOld()
 
-	srv := &server.Server{Version: version, FFmpeg: ffmpeg, Store: store, Recorder: rec, Updater: upd, Log: log, Static: web.FS, TrustLocal: true}
+	tunnelName := cfg.Tunnel.ServiceName
+	if tunnelName == "" {
+		tunnelName = "Cloudflared"
+	}
+	tun := &tunnel.Updater{
+		Service: tunnel.NewService(tunnelName), Config: store.Get, AppVersion: version,
+		TryLock: rec.TryLock, Unlock: rec.Unlock, Log: log.Logger,
+		Notify: func(subject, text string) { emailAdmins(store, log, subject, text) },
+	}
+
+	srv := &server.Server{Version: version, FFmpeg: ffmpeg, Store: store, Recorder: rec, Updater: upd, Tunnel: tun, Log: log, Static: web.FS, TrustLocal: true}
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	ln, err := net.Listen("tcp", net.JoinHostPort("", strconv.Itoa(cfg.Port)))
 	if err != nil {
@@ -160,6 +171,7 @@ func run(ctx context.Context, exe, baseDir string) (restart bool, err error) {
 		Log:       log.Logger,
 	}
 	go alerts.Run(bgCtx)
+	go tun.Run(bgCtx)
 	rec.Resume()
 
 	select {
@@ -176,6 +188,20 @@ func run(ctx context.Context, exe, baseDir string) (restart bool, err error) {
 	httpSrv.Shutdown(shutdownCtx)
 	rec.Shutdown(shutdownCtx)
 	return restart, err
+}
+
+// emailAdmins sends a message to the admins, when emails are configured.
+func emailAdmins(store *config.Store, log *logging.Logger, subject, text string) {
+	cfg := store.Get()
+	if !cfg.Notify.Enabled() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	email := notify.Email{To: notify.AdminEmails(cfg), Subject: cfg.Title + ": " + subject, Text: text}
+	if err := notify.Send(ctx, cfg.Notify, email); err != nil {
+		log.Warn("email to admins not sent", "subject", subject, "err", err)
+	}
 }
 
 func retention(ctx context.Context, rec *recorder.Recorder, store *config.Store) {

@@ -12,6 +12,7 @@ A single executable that runs as a Windows service and **updates itself** from G
 - Reconnects automatically if the camera drops, and resumes recording after a PC or service restart
 - Optional automatic deletion of old recordings, plus a disk space indicator
 - Email alerts to the admins (through [Resend](https://resend.com)) when a recording runs longer than N hours, every hour until it stops
+- Keeps cloudflared (the Cloudflare Tunnel connector) up to date: weekly or on demand, after recordings end, and rolls back if the site doesn't come back through the tunnel
 - Logs viewable from the UI
 
 ## Install (Windows)
@@ -60,7 +61,9 @@ Most settings are edited in the UI and stored in `config.json` next to the execu
 | `title` | Page title |
 | `notify.longRecordingHours` | Email the admins when a recording runs this many hours, then every hour (`0` = off, default `3`) |
 | `notify.resendApiKey`, `notify.from` | Resend API key and sender (on a domain verified in Resend). The key is never sent back to the browser |
-| `notify.siteUrl` | Address linked from the emails, e.g. `https://futsal.retorta.com` |
+| `notify.siteUrl` | Public address, e.g. `https://futsal.retorta.com`. Linked from the emails, and used to check the tunnel after a cloudflared update (required for those updates) |
+| `tunnel.autoUpdate` | Update cloudflared on Mondays at 04:00, once nothing is recording (default `true`) |
+| `tunnel.serviceName` | *(file only)* cloudflared's Windows service, default `Cloudflared` |
 | `users` | *(managed in the UI or with `add-user`)* Users: email, role and password hash |
 | `port` | *(file only)* HTTP port, default `8080`. Restart the service after changing it |
 | `ffmpegPath` | *(file only)* Custom ffmpeg. By default the app uses the `ffmpeg.exe` shipped next to it |

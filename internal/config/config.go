@@ -51,6 +51,8 @@ type Config struct {
 	AdminPasswordHash string `json:"adminPasswordHash,omitempty"`
 	// Notify sends emails to the admins (e.g. a recording running too long).
 	Notify Notify `json:"notify"`
+	// Tunnel keeps cloudflared (the Cloudflare Tunnel connector) up to date.
+	Tunnel Tunnel `json:"tunnel"`
 	// Users can log in to the web page. While there are none, the recorder
 	// is open to everyone (as before 2.7) and nobody can reach the settings.
 	Users []User `json:"users,omitempty"`
@@ -65,7 +67,18 @@ func Default() Config {
 		RecordingsDir: "recordings",
 		AutoUpdate:    true,
 		Notify:        Notify{LongRecordingHours: 3},
+		Tunnel:        Tunnel{AutoUpdate: true},
 	}
+}
+
+// Tunnel configures the cloudflared updates (see internal/tunnel).
+type Tunnel struct {
+	// AutoUpdate updates cloudflared weekly (Monday 04:00–05:00), once
+	// nothing is recording.
+	AutoUpdate bool `json:"autoUpdate"`
+	// ServiceName is the cloudflared Windows service. File only; default
+	// "Cloudflared", the name `cloudflared service install` uses.
+	ServiceName string `json:"serviceName,omitempty"`
 }
 
 // Notify configures the email alerts, sent through the Resend API.

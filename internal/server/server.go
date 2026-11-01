@@ -30,6 +30,8 @@
 //	POST   /api/settings/notify-test send a test email to the admins          [admin]
 //	POST   /api/update/check         check for updates now                    [admin]
 //	GET    /api/logs                 recent log lines                         [admin]
+//	GET    /api/tunnel               cloudflared versions and update state    [admin]
+//	POST   /api/tunnel/update        update cloudflared now (when idle)       [admin]
 package server
 
 import (
@@ -49,6 +51,7 @@ import (
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/notify"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/recorder"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/sysinfo"
+	"github.com/joaoopereira/simple-rtsp-recorder/internal/tunnel"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/updater"
 )
 
@@ -61,6 +64,7 @@ type Server struct {
 	Store    *config.Store
 	Recorder *recorder.Recorder
 	Updater  *updater.Updater
+	Tunnel   *tunnel.Updater
 	Log      *logging.Logger
 	Static   fs.FS
 	// TrustLocal lets a browser on the PC itself use the recorder without a
@@ -107,6 +111,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/settings/notify-test", admin(s.testNotify))
 	mux.HandleFunc("POST /api/update/check", admin(s.checkUpdate))
 	mux.HandleFunc("GET /api/logs", admin(s.logs))
+	mux.HandleFunc("GET /api/tunnel", admin(s.tunnelStatus))
+	mux.HandleFunc("POST /api/tunnel/update", admin(s.tunnelUpdate))
 	mux.Handle("GET /", newStaticHandler(s.Static))
 	return mux
 }
@@ -266,6 +272,9 @@ type settingsDTO struct {
 	RecordingsDir string `json:"recordingsDir"`
 	RetentionDays int    `json:"retentionDays"`
 	AutoUpdate    bool   `json:"autoUpdate"`
+	Tunnel        struct {
+		AutoUpdate bool `json:"autoUpdate"`
+	} `json:"tunnel"`
 	// The Resend API key is write-only, like the camera password.
 	Notify struct {
 		From               string  `json:"from"`
@@ -284,6 +293,7 @@ func toDTO(c config.Config) settingsDTO {
 	d.RecordingsDir, d.RetentionDays, d.AutoUpdate = c.RecordingsDir, c.RetentionDays, c.AutoUpdate
 	d.Notify.From, d.Notify.SiteURL, d.Notify.LongRecordingHours = c.Notify.From, c.Notify.SiteURL, c.Notify.LongRecordingHours
 	d.Notify.HasAPIKey = c.Notify.ResendAPIKey != ""
+	d.Tunnel.AutoUpdate = c.Tunnel.AutoUpdate
 	return d
 }
 
@@ -302,6 +312,7 @@ func (d settingsDTO) apply(c config.Config) config.Config {
 		key = *d.Notify.APIKey
 	}
 	c.Notify = config.Notify{ResendAPIKey: key, From: d.Notify.From, SiteURL: d.Notify.SiteURL, LongRecordingHours: d.Notify.LongRecordingHours}
+	c.Tunnel.AutoUpdate = d.Tunnel.AutoUpdate // serviceName is file only
 	return c
 }
 
@@ -390,6 +401,29 @@ func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Log.Info("test email sent", "to", strings.Join(email.To, ", "))
 	writeJSON(w, http.StatusOK, map[string][]string{"to": email.To})
+}
+
+// tunnelStatus also refreshes the versions in the background when they are
+// more than an hour old, so the settings page shows current ones.
+func (s *Server) tunnelStatus(w http.ResponseWriter, r *http.Request) {
+	st := s.Tunnel.Status()
+	if st.State == "idle" && time.Since(st.LastCheck) > time.Hour {
+		go s.Tunnel.Refresh(context.Background())
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+func (s *Server) tunnelUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := s.Tunnel.UpdateNow(); err != nil {
+		code := http.StatusConflict
+		if errors.Is(err, tunnel.ErrUnsupported) {
+			code = http.StatusBadRequest
+		}
+		writeError(w, code, err)
+		return
+	}
+	s.Log.Info("cloudflared update requested from UI", "remote", r.RemoteAddr)
+	writeJSON(w, http.StatusAccepted, s.Tunnel.Status())
 }
 
 func (s *Server) checkUpdate(w http.ResponseWriter, r *http.Request) {

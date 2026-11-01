@@ -17,6 +17,7 @@ import (
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/logging"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/notify"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/recorder"
+	"github.com/joaoopereira/simple-rtsp-recorder/internal/tunnel"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/updater"
 	"github.com/joaoopereira/simple-rtsp-recorder/web"
 )
@@ -46,7 +47,8 @@ func newServer(t *testing.T, trustLocal bool) (*httptest.Server, *config.Store) 
 		return store.Get().Camera.StreamURL(), store.RecordingsDir()
 	}, filepath.Join(dir, "state"), log.Logger)
 	upd := updater.New(updater.Options{Current: "dev", Log: log.Logger, Enabled: func() bool { return false }})
-	s := &Server{Version: "test", Store: store, Recorder: rec, Updater: upd, Log: log, Static: web.FS, TrustLocal: trustLocal}
+	tun := &tunnel.Updater{Service: tunnel.NewService("Cloudflared"), Config: store.Get, Log: log.Logger} // unsupported off Windows
+	s := &Server{Version: "test", Store: store, Recorder: rec, Updater: upd, Tunnel: tun, Log: log, Static: web.FS, TrustLocal: trustLocal}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	return srv, store
@@ -251,6 +253,8 @@ func TestAccessByRole(t *testing.T) {
 		{"POST", "/api/settings/notify-test", [4]int{401, 403, 403, ok}},
 		{"POST", "/api/update/check", [4]int{401, 403, 403, ok}},
 		{"GET", "/api/logs", [4]int{401, 403, 403, ok}},
+		{"GET", "/api/tunnel", [4]int{401, 403, 403, ok}},
+		{"POST", "/api/tunnel/update", [4]int{401, 403, 403, ok}},
 		{"PUT", "/api/me/password", [4]int{401, ok, ok, ok}},
 	} {
 		for i, who := range []string{"anon", "user", "manager", "admin"} {
@@ -732,5 +736,29 @@ func TestLocalAccess(t *testing.T) {
 	doWith(t, admin, "POST", local.URL+"/api/logout", "")
 	if resp, _ := doWith(t, admin, "GET", local.URL+"/api/settings", ""); resp.StatusCode != 403 {
 		t.Errorf("settings after logout on the PC = %d, want 403", resp.StatusCode)
+	}
+}
+
+func TestTunnelEndpoints(t *testing.T) {
+	srv, store := newTestServer(t)
+	c := adminClient(t, srv)
+	if resp, body := doWith(t, c, "GET", srv.URL+"/api/tunnel", ""); resp.StatusCode != 200 || !strings.Contains(body, `"state"`) {
+		t.Fatalf("status = %d %s", resp.StatusCode, body)
+	}
+	// Off Windows there is no cloudflared service to update.
+	if resp, body := doWith(t, c, "POST", srv.URL+"/api/tunnel/update", ""); resp.StatusCode != 400 || !strings.Contains(body, "Windows") {
+		t.Fatalf("update = %d %s", resp.StatusCode, body)
+	}
+	// The weekly update is a setting, on by default.
+	_, body := doWith(t, c, "GET", srv.URL+"/api/settings", "")
+	if !strings.Contains(body, `"tunnel":{"autoUpdate":true}`) {
+		t.Fatalf("settings = %s", body)
+	}
+	body = strings.Replace(body, `"tunnel":{"autoUpdate":true}`, `"tunnel":{"autoUpdate":false}`, 1)
+	if resp, b := doWith(t, c, "PUT", srv.URL+"/api/settings", body); resp.StatusCode != 200 {
+		t.Fatalf("save = %d %s", resp.StatusCode, b)
+	}
+	if store.Get().Tunnel.AutoUpdate {
+		t.Fatal("autoUpdate not saved")
 	}
 }
