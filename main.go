@@ -35,6 +35,7 @@ import (
 
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/config"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/logging"
+	"github.com/joaoopereira/simple-rtsp-recorder/internal/notify"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/recorder"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/server"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/service"
@@ -153,6 +154,12 @@ func run(ctx context.Context, exe, baseDir string) (restart bool, err error) {
 	defer cancelBg()
 	go upd.Run(bgCtx)
 	go retention(bgCtx, rec, store)
+	alerts := &notify.Watcher{
+		Config:    store.Get,
+		StartedAt: func() *time.Time { return rec.Status().StartedAt },
+		Log:       log.Logger,
+	}
+	go alerts.Run(bgCtx)
 	rec.Resume()
 
 	select {

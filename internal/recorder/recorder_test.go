@@ -3,6 +3,7 @@ package recorder
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -256,5 +257,43 @@ func TestValidName(t *testing.T) {
 		if ValidName(n) {
 			t.Errorf("ValidName(%q) = true", n)
 		}
+	}
+}
+
+// A session resumed after a restart keeps its original start time, so the
+// timer and the long-recording alert count from when it really began.
+func TestResumeKeepsStartTime(t *testing.T) {
+	ffmpeg := requireFFmpeg(t)
+	r, dir := newTestRecorder(t, testSource(t, ffmpeg))
+	stateFile := filepath.Join(dir, "state.json")
+
+	// A fresh recording stores the moment the camera connected.
+	if err := r.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "recording", func() bool { return r.Status().State == StateRecording })
+	started := *r.Status().StartedAt
+	var st struct {
+		Since time.Time `json:"since"`
+	}
+	data, _ := os.ReadFile(stateFile)
+	if json.Unmarshal(data, &st); !st.Since.Equal(started) {
+		t.Fatalf("state file since = %v, want the connection time %v", st.Since, started)
+	}
+	r.Shutdown(context.Background()) // like a service restart: the state file stays
+
+	since := time.Now().Add(-2 * time.Hour).Round(time.Second)
+	os.WriteFile(stateFile, []byte(`{"recording":true,"since":"`+since.Format(time.RFC3339)+`"}`), 0o644)
+	r2, _ := newTestRecorder(t, testSource(t, ffmpeg))
+	r2.stateFile = stateFile
+	r2.Resume()
+	waitFor(t, "recording", func() bool { return r2.Status().State == StateRecording })
+	if got := r2.Status().StartedAt; got == nil || !got.Equal(since) {
+		t.Fatalf("resumed StartedAt = %v, want %v", got, since)
+	}
+	r2.Stop()
+	waitFor(t, "idle", func() bool { return r2.Status().State == StateIdle })
+	if _, err := os.Stat(stateFile); err == nil {
+		t.Fatal("state file left after stop")
 	}
 }

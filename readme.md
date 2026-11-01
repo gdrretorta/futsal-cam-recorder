@@ -11,6 +11,7 @@ A single executable that runs as a Windows service and **updates itself** from G
 - Recordings survive power cuts: files are fragmented MP4 while recording and finalized when stopped
 - Reconnects automatically if the camera drops, and resumes recording after a PC or service restart
 - Optional automatic deletion of old recordings, plus a disk space indicator
+- Email alerts to the admins (through [Resend](https://resend.com)) when a recording runs longer than N hours, every hour until it stops
 - Logs viewable from the UI
 
 ## Install (Windows)
@@ -55,6 +56,9 @@ Most settings are edited in the UI and stored in `config.json` next to the execu
 | `retentionDays` | Delete recordings older than N days (`0` = keep forever) |
 | `autoUpdate` | Install new releases automatically when idle |
 | `title` | Page title |
+| `notify.longRecordingHours` | Email the admins when a recording runs this many hours, then every hour (`0` = off, default `3`) |
+| `notify.resendApiKey`, `notify.from` | Resend API key and sender (on a domain verified in Resend). The key is never sent back to the browser |
+| `notify.siteUrl` | Address linked from the emails, e.g. `https://futsal.retorta.com` |
 | `users` | *(managed in the UI or with `add-user`)* Users: email, role and password hash |
 | `port` | *(file only)* HTTP port, default `8080`. Restart the service after changing it |
 | `ffmpegPath` | *(file only)* Custom ffmpeg. By default the app uses the `ffmpeg.exe` shipped next to it |

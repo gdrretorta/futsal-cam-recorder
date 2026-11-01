@@ -20,6 +20,7 @@ internal/recorder           ffmpeg process: start/stop, reconnect, finalize (fas
 internal/server             HTTP API + static files (endpoint list in the package doc); auth.go = login, sessions, roles; users.go = user management
 internal/updater            GitHub release check → download + sha256 verify → swap exe when idle → restart
 internal/service            Windows service run/install/uninstall (stub on other OSes)
+internal/notify             emails to the admins through the Resend API; Watcher = long-recording alert
 internal/logging            slog → rotating file logs/recorder.log + stdout + in-memory tail for /api/logs
 internal/sysinfo            free disk space (windows / unix)
 web/                        index.html, app.js, style.css, icon.svg (embedded)
@@ -72,6 +73,7 @@ To run the app against the fake camera, see `.claude/skills/run-app/SKILL.md`.
 
 - **API endpoint**: register a handler in `server.Handler()`, add it to the package doc list, and add a test in `server_test.go`. Then call it from `web/app.js` through `api()`.
 - **Setting**: add the field to `config.Config` with a default and validation, then to `settingsDTO` and its `toDTO`/`apply` in `server.go`, then to the settings form in `index.html` and to `openSettings`/`formSettings` in `app.js`. Settings are admin-only automatically. `apply` must keep fields that aren't in the DTO, such as `users`.
+- **Email alert**: build the message in `internal/notify` and send it with `notify.Send` to `notify.AdminEmails(cfg)`. Emails go out through the Resend HTTP API (`api.resend.com`), configured in the settings (`notify`). The long-recording alert (`notify.Watcher`, started in `main.go`) checks every minute and emails the admins when a recording reaches `notify.longRecordingHours`, then every hour; a failure is retried after 10 minutes. It counts from `Recorder.Status().StartedAt`, which survives a restart (the start time is kept in `recording.state`).
 - **ffmpeg arguments**: `recordArgs` / `inputArgs` in `recorder.go`. Cover the change in `recorder_test.go`, which uses a real ffmpeg and a generated test file.
 
 ## Security model
@@ -88,4 +90,4 @@ To run the app against the fake camera, see `.claude/skills/run-app/SKILL.md`.
 - Failed logins are locked out per IP: 5 failures in 15 minutes. The IP comes from `Cf-Connecting-Ip`, trusted only when the connection comes from loopback (cloudflared). An unknown email takes as long as a wrong password (`dummyHash`).
 - Changes to users go through `Store.Edit` (read-modify-write under a lock), so concurrent edits don't overwrite each other. `PUT /api/settings` uses it too.
 - `config.Store` reloads `config.json` when the file changes on disk, so edits from the CLI or by hand apply without restarting the service.
-- Never return the camera password or a password hash from the API.
+- Never return the camera password, the Resend API key (`notify.resendApiKey`, write-only like the camera password: `hasApiKey` / absent `apiKey` keeps it) or a password hash from the API.

@@ -26,6 +26,7 @@
 //	GET    /api/settings             settings (password never returned)       [admin]
 //	PUT    /api/settings             save settings                            [admin]
 //	POST   /api/settings/test        test camera settings, returns a JPEG     [admin]
+//	POST   /api/settings/notify-test send a test email to the admins          [admin]
 //	POST   /api/update/check         check for updates now                    [admin]
 //	GET    /api/logs                 recent log lines                         [admin]
 package server
@@ -38,11 +39,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/config"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/logging"
+	"github.com/joaoopereira/simple-rtsp-recorder/internal/notify"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/recorder"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/sysinfo"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/updater"
@@ -96,6 +99,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/settings", admin(s.getSettings))
 	mux.HandleFunc("PUT /api/settings", admin(s.putSettings))
 	mux.HandleFunc("POST /api/settings/test", admin(s.testSettings))
+	mux.HandleFunc("POST /api/settings/notify-test", admin(s.testNotify))
 	mux.HandleFunc("POST /api/update/check", admin(s.checkUpdate))
 	mux.HandleFunc("GET /api/logs", admin(s.logs))
 	mux.Handle("GET /", newStaticHandler(s.Static))
@@ -257,6 +261,14 @@ type settingsDTO struct {
 	RecordingsDir string `json:"recordingsDir"`
 	RetentionDays int    `json:"retentionDays"`
 	AutoUpdate    bool   `json:"autoUpdate"`
+	// The Resend API key is write-only, like the camera password.
+	Notify struct {
+		From               string  `json:"from"`
+		SiteURL            string  `json:"siteUrl"`
+		LongRecordingHours int     `json:"longRecordingHours"`
+		APIKey             *string `json:"apiKey,omitempty"`
+		HasAPIKey          bool    `json:"hasApiKey"`
+	} `json:"notify"`
 }
 
 func toDTO(c config.Config) settingsDTO {
@@ -265,6 +277,8 @@ func toDTO(c config.Config) settingsDTO {
 	d.Camera.Host, d.Camera.Port, d.Camera.Path, d.Camera.User = c.Camera.Host, c.Camera.Port, c.Camera.Path, c.Camera.User
 	d.Camera.HasPassword = c.Camera.Password != ""
 	d.RecordingsDir, d.RetentionDays, d.AutoUpdate = c.RecordingsDir, c.RetentionDays, c.AutoUpdate
+	d.Notify.From, d.Notify.SiteURL, d.Notify.LongRecordingHours = c.Notify.From, c.Notify.SiteURL, c.Notify.LongRecordingHours
+	d.Notify.HasAPIKey = c.Notify.ResendAPIKey != ""
 	return d
 }
 
@@ -278,6 +292,11 @@ func (d settingsDTO) apply(c config.Config) config.Config {
 	}
 	c.Camera = config.Camera{Host: d.Camera.Host, Port: d.Camera.Port, Path: d.Camera.Path, User: d.Camera.User, Password: pw, URL: c.Camera.URL}
 	c.RecordingsDir, c.RetentionDays, c.AutoUpdate = d.RecordingsDir, d.RetentionDays, d.AutoUpdate
+	key := c.Notify.ResendAPIKey
+	if d.Notify.APIKey != nil {
+		key = *d.Notify.APIKey
+	}
+	c.Notify = config.Notify{ResendAPIKey: key, From: d.Notify.From, SiteURL: d.Notify.SiteURL, LongRecordingHours: d.Notify.LongRecordingHours}
 	return c
 }
 
@@ -344,6 +363,28 @@ func (s *Server) testSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Write(img)
+}
+
+// testNotify sends a test email to the admins with the settings in the form,
+// saved or not.
+func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
+	_, cfg, ok := s.readSettings(w, r)
+	if !ok {
+		return
+	}
+	email := notify.TestEmail(cfg)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	if err := notify.Send(ctx, cfg.Notify, email); err != nil {
+		code := http.StatusBadGateway
+		if errors.Is(err, notify.ErrNotConfigured) {
+			code = http.StatusBadRequest
+		}
+		writeError(w, code, err)
+		return
+	}
+	s.Log.Info("test email sent", "to", strings.Join(email.To, ", "))
+	writeJSON(w, http.StatusOK, map[string][]string{"to": email.To})
 }
 
 func (s *Server) checkUpdate(w http.ResponseWriter, r *http.Request) {

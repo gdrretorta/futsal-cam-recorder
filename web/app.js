@@ -432,6 +432,13 @@ async function openSettings() {
   fields.retentionDays.value = s.retentionDays;
   fields.title.value = s.title;
   fields.autoUpdate.checked = s.autoUpdate;
+  fields.notifyHours.value = s.notify.longRecordingHours;
+  fields.notifyFrom.value = s.notify.from;
+  fields.notifySite.value = s.notify.siteUrl;
+  fields.notifyKey.value = "";
+  fields.notifyKey.placeholder = s.notify.hasApiKey ? "•••••• (inalterada)" : "re_…";
+  fields.notifyKey.dataset.touched = "";
+  $("notifyTestResult").textContent = "";
   $("settingsError").hidden = true;
   $("testResult").textContent = "";
   $("testImg").hidden = true;
@@ -439,6 +446,7 @@ async function openSettings() {
 }
 
 fields.password.addEventListener("input", () => (fields.password.dataset.touched = "1"));
+fields.notifyKey.addEventListener("input", () => (fields.notifyKey.dataset.touched = "1"));
 
 function formSettings() {
   const camera = {
@@ -455,8 +463,29 @@ function formSettings() {
     recordingsDir: fields.recordingsDir.value.trim(),
     retentionDays: Number(fields.retentionDays.value) || 0,
     autoUpdate: fields.autoUpdate.checked,
+    notify: {
+      longRecordingHours: Number(fields.notifyHours.value) || 0,
+      from: fields.notifyFrom.value.trim(),
+      siteUrl: fields.notifySite.value.trim(),
+      // Like the camera password: only sent when edited.
+      ...(fields.notifyKey.dataset.touched ? { apiKey: fields.notifyKey.value.trim() } : {}),
+    },
   };
 }
+
+$("notifyTestBtn").addEventListener("click", async () => {
+  const btn = $("notifyTestBtn");
+  btn.disabled = true;
+  $("notifyTestResult").textContent = "A enviar…";
+  try {
+    const r = await api("POST", "/api/settings/notify-test", formSettings());
+    $("notifyTestResult").textContent = "✓ Enviado para " + r.to.join(", ");
+  } catch (e) {
+    $("notifyTestResult").textContent = "✗ " + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 form.addEventListener("submit", async (ev) => {
   ev.preventDefault();

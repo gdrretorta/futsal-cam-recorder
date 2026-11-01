@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/mail"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -48,6 +49,8 @@ type Config struct {
 	// moved to an admin in Users when the file is loaded (see migrateUsers)
 	// and stays empty afterwards.
 	AdminPasswordHash string `json:"adminPasswordHash,omitempty"`
+	// Notify sends emails to the admins (e.g. a recording running too long).
+	Notify Notify `json:"notify"`
 	// Users can log in to the web page. While there are none, the recorder
 	// is open to everyone (as before 2.7) and nobody can reach the settings.
 	Users []User `json:"users,omitempty"`
@@ -61,8 +64,26 @@ func Default() Config {
 		Camera:        Camera{Port: 554},
 		RecordingsDir: "recordings",
 		AutoUpdate:    true,
+		Notify:        Notify{LongRecordingHours: 3},
 	}
 }
+
+// Notify configures the email alerts, sent through the Resend API.
+type Notify struct {
+	// ResendAPIKey is write-only in the API, like the camera password.
+	ResendAPIKey string `json:"resendApiKey,omitempty"`
+	// From is the sender, on a domain verified in Resend, e.g.
+	// "Gravador <gravador@retorta.com>".
+	From string `json:"from,omitempty"`
+	// SiteURL is linked from the emails, e.g. https://futsal.retorta.com.
+	SiteURL string `json:"siteUrl,omitempty"`
+	// LongRecordingHours alerts the admins when a recording runs this long,
+	// and again every hour after that. 0 turns the alert off.
+	LongRecordingHours int `json:"longRecordingHours"`
+}
+
+// Enabled reports whether emails can be sent.
+func (n Notify) Enabled() bool { return n.ResendAPIKey != "" && n.From != "" }
 
 // StreamURL builds the RTSP URL including credentials.
 func (c Camera) StreamURL() string {
@@ -126,6 +147,21 @@ func (c *Config) Validate() error {
 		return errors.New("dias de retenção não pode ser negativo")
 	case strings.ContainsAny(c.Camera.Host, "/@ "):
 		return errors.New("endereço da câmara inválido (indique só o IP ou nome)")
+	case c.Notify.LongRecordingHours < 0 || c.Notify.LongRecordingHours > 48:
+		return errors.New("o aviso de gravação longa tem de ser entre 0 e 48 horas")
+	}
+	c.Notify.From = strings.TrimSpace(c.Notify.From)
+	c.Notify.SiteURL = strings.TrimRight(strings.TrimSpace(c.Notify.SiteURL), "/")
+	c.Notify.ResendAPIKey = strings.TrimSpace(c.Notify.ResendAPIKey)
+	if c.Notify.From != "" {
+		if _, err := mail.ParseAddress(c.Notify.From); err != nil {
+			return errors.New("remetente dos emails inválido (ex.: Gravador <gravador@retorta.com>)")
+		}
+	}
+	if u := c.Notify.SiteURL; u != "" {
+		if p, err := url.Parse(u); err != nil || (p.Scheme != "http" && p.Scheme != "https") || p.Host == "" {
+			return errors.New("endereço do site inválido (ex.: https://futsal.retorta.com)")
+		}
 	}
 	return validateUsers(c.Users)
 }

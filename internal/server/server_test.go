@@ -15,6 +15,7 @@ import (
 
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/config"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/logging"
+	"github.com/joaoopereira/simple-rtsp-recorder/internal/notify"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/recorder"
 	"github.com/joaoopereira/simple-rtsp-recorder/internal/updater"
 	"github.com/joaoopereira/simple-rtsp-recorder/web"
@@ -242,6 +243,7 @@ func TestAccessByRole(t *testing.T) {
 		{"GET", "/api/settings", [4]int{401, 403, 403, ok}},
 		{"PUT", "/api/settings", [4]int{401, 403, 403, ok}},
 		{"POST", "/api/settings/test", [4]int{401, 403, 403, ok}},
+		{"POST", "/api/settings/notify-test", [4]int{401, 403, 403, ok}},
 		{"POST", "/api/update/check", [4]int{401, 403, 403, ok}},
 		{"GET", "/api/logs", [4]int{401, 403, 403, ok}},
 		{"PUT", "/api/me/password", [4]int{401, ok, ok, ok}},
@@ -562,5 +564,83 @@ func TestStaticAssetsAreVersioned(t *testing.T) {
 	}
 	if resp, _ := do(t, "GET", srv.URL+"/style.css", ""); !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/css") {
 		t.Errorf("style.css Content-Type = %q", resp.Header.Get("Content-Type"))
+	}
+}
+
+// The Resend API key is write-only, and the test email goes to the admins
+// with the settings of the form.
+func TestNotifySettings(t *testing.T) {
+	var sent map[string]any
+	resend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer re_secret" {
+			w.WriteHeader(401)
+			w.Write([]byte(`{"message":"API key is invalid"}`))
+			return
+		}
+		json.NewDecoder(r.Body).Decode(&sent)
+		w.Write([]byte(`{"id":"1"}`))
+	}))
+	defer resend.Close()
+	old := notify.ResendURL
+	notify.ResendURL = resend.URL
+	defer func() { notify.ResendURL = old }()
+
+	srv, store := newTestServer(t)
+	addUser(t, srv, store, "user@example.com", config.RoleUser)
+	c := adminClient(t, srv)
+	_, body := doWith(t, c, "GET", srv.URL+"/api/settings", "")
+	if !strings.Contains(body, `"longRecordingHours":3`) || !strings.Contains(body, `"hasApiKey":false`) {
+		t.Fatalf("defaults = %s", body)
+	}
+	var dto map[string]any
+	json.Unmarshal([]byte(body), &dto)
+	n := dto["notify"].(map[string]any)
+	n["apiKey"], n["from"], n["siteUrl"], n["longRecordingHours"] = "re_wrong", "Gravador <g@retorta.com>", "https://futsal.retorta.com/", 4
+	payload, _ := json.Marshal(dto)
+
+	// The test uses the form, saved or not, and reports Resend's error.
+	if resp, body := doWith(t, c, "POST", srv.URL+"/api/settings/notify-test", string(payload)); resp.StatusCode != 502 || !strings.Contains(body, "API key is invalid") {
+		t.Fatalf("test with a bad key = %d %s", resp.StatusCode, body)
+	}
+	n["apiKey"] = "re_secret"
+	payload, _ = json.Marshal(dto)
+	if resp, body := doWith(t, c, "POST", srv.URL+"/api/settings/notify-test", string(payload)); resp.StatusCode != 200 || body != `{"to":["admin@example.com"]}`+"\n" {
+		t.Fatalf("test = %d %s", resp.StatusCode, body)
+	}
+	if sent["from"] != "Gravador <g@retorta.com>" {
+		t.Errorf("sent = %v", sent)
+	}
+	if store.Get().Notify.ResendAPIKey != "" {
+		t.Fatal("the test saved the settings")
+	}
+
+	if resp, body := doWith(t, c, "PUT", srv.URL+"/api/settings", string(payload)); resp.StatusCode != 200 {
+		t.Fatalf("save = %d %s", resp.StatusCode, body)
+	}
+	got := store.Get().Notify
+	if got.ResendAPIKey != "re_secret" || got.SiteURL != "https://futsal.retorta.com" || got.LongRecordingHours != 4 {
+		t.Fatalf("saved = %+v", got)
+	}
+	_, body = doWith(t, c, "GET", srv.URL+"/api/settings", "")
+	if strings.Contains(body, "re_secret") || !strings.Contains(body, `"hasApiKey":true`) {
+		t.Fatalf("key leaked or hidden: %s", body)
+	}
+	// Saving without the key keeps it.
+	delete(n, "apiKey")
+	payload, _ = json.Marshal(dto)
+	doWith(t, c, "PUT", srv.URL+"/api/settings", string(payload))
+	if store.Get().Notify.ResendAPIKey != "re_secret" {
+		t.Fatal("key lost when saving without it")
+	}
+	for _, bad := range []map[string]any{{"from": "not an address"}, {"siteUrl": "futsal.retorta.com"}, {"longRecordingHours": -1}} {
+		for k, v := range bad {
+			old := n[k]
+			n[k] = v
+			payload, _ = json.Marshal(dto)
+			if resp, _ := doWith(t, c, "PUT", srv.URL+"/api/settings", string(payload)); resp.StatusCode != 400 {
+				t.Errorf("%s = %v accepted: %d", k, v, resp.StatusCode)
+			}
+			n[k] = old
+		}
 	}
 }

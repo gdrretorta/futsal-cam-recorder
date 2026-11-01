@@ -141,20 +141,27 @@ func (r *Recorder) Status() Status {
 
 // Start begins a recording session. It returns once ffmpeg is launched; the
 // connection result shows up in Status.
-func (r *Recorder) Start() error { return r.start(false) }
+func (r *Recorder) Start() error { return r.start(false, time.Time{}) }
 
-// Resume restarts a session that was interrupted by a process restart.
+// Resume restarts a session that was interrupted by a process restart. The
+// session keeps its original start time, so the timer (and the long-recording
+// alert) count from when it really began.
 func (r *Recorder) Resume() {
-	if _, err := os.Stat(r.stateFile); err != nil {
+	data, err := os.ReadFile(r.stateFile)
+	if err != nil {
 		return
 	}
-	r.log.Info("resuming recording interrupted by restart")
-	if err := r.start(true); err != nil {
+	var st struct {
+		Since time.Time `json:"since"`
+	}
+	json.Unmarshal(data, &st) // a zero time just restarts the count
+	r.log.Info("resuming recording interrupted by restart", "since", st.Since)
+	if err := r.start(true, st.Since); err != nil {
 		r.log.Error("resume failed", "err", err)
 	}
 }
 
-func (r *Recorder) start(resume bool) error {
+func (r *Recorder) start(resume bool, since time.Time) error {
 	url, dir := r.source()
 	if url == "" {
 		return ErrNotConfigured
@@ -170,7 +177,7 @@ func (r *Recorder) start(resume bool) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("não foi possível criar a pasta de gravações: %w", err)
 	}
-	r.state, r.startedAt, r.file, r.lastErr = StateConnecting, time.Time{}, "", ""
+	r.state, r.startedAt, r.file, r.lastErr = StateConnecting, since, "", ""
 	r.stop, r.done = make(chan struct{}), make(chan struct{})
 	r.persist(true)
 	go r.session(r.stop, r.done, resume)
@@ -446,6 +453,11 @@ func (r *Recorder) recordOnce(url, path string, stop chan struct{}) (connected, 
 				}
 				if r.startedAt.IsZero() {
 					r.startedAt = time.Now()
+					// Remember the real start for a resume, unless a stop
+					// already removed the state file.
+					if r.state != StateStopping {
+						r.persist(true)
+					}
 				}
 				r.mu.Unlock()
 				r.log.Info("camera connected, recording", "url", config.Redact(url))
@@ -748,7 +760,11 @@ func (r *Recorder) persist(recording bool) {
 		os.Remove(r.stateFile)
 		return
 	}
-	data, _ := json.Marshal(map[string]any{"recording": true, "since": time.Now()})
+	since := r.startedAt
+	if since.IsZero() {
+		since = time.Now()
+	}
+	data, _ := json.Marshal(map[string]any{"recording": true, "since": since})
 	if err := os.WriteFile(r.stateFile, data, 0o644); err != nil {
 		r.log.Warn("could not persist recording state", "err", err)
 	}

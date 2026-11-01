@@ -142,6 +142,18 @@
         <label>Apagar gravações com mais de (dias, 0 = nunca)<input name="retentionDays" type="number" min="0" value="0"></label>
       </fieldset>
       <fieldset>
+        <legend>Avisos por email</legend>
+        <p class="muted hint">Os avisos vão para todos os administradores, pela <a href="https://resend.com" target="_blank" rel="noopener">Resend</a>.</p>
+        <label>Avisar quando uma gravação passa de (horas, 0 = nunca)<input name="notifyHours" type="number" min="0" max="48" value="3"></label>
+        <label>API key da Resend<input name="notifyKey" type="password" autocomplete="off" placeholder="re_…"></label>
+        <label>Remetente (num domínio verificado na Resend)<input name="notifyFrom" placeholder="Gravador &lt;gravador@retorta.com&gt;"></label>
+        <label>Endereço do site (para o link nos emails)<input name="notifySite" type="url" placeholder="https://futsal.retorta.com"></label>
+        <div class="test-row">
+          <button type="button" id="notifyTestBtn" class="btn">Enviar email de teste</button>
+          <span id="notifyTestResult" class="muted"></span>
+        </div>
+      </fieldset>
+      <fieldset>
         <legend>Geral</legend>
         <label>Título<input name="title"></label>
         <label class="check"><input name="autoUpdate" type="checkbox"> Atualizar automaticamente (só quando não há gravações)</label>
