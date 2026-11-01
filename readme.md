@@ -32,7 +32,7 @@ To create a user or reset its password from the PC (role `admin`, `userManager` 
 'nova-palavra-passe' | .\simple-rtsp-recorder.exe add-user joao@exemplo.pt admin
 ```
 
-On the PC itself (`http://localhost:8080`) there is no login: you are an admin.
+On the PC itself (`http://localhost:8080`) the recorder works without logging in. The settings and users still need an admin login (the 👤 button).
 
 Upgrades from 2.6 or older turn the old admin password into an admin user with the same password. While no user exists, the recorder is open to everyone, as in older versions.
 

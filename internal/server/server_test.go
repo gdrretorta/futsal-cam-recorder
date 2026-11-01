@@ -23,6 +23,11 @@ import (
 
 func newTestServer(t *testing.T) (*httptest.Server, *config.Store) {
 	t.Helper()
+	return newServer(t, false)
+}
+
+func newServer(t *testing.T, trustLocal bool) (*httptest.Server, *config.Store) {
+	t.Helper()
 	dir := t.TempDir()
 	store, err := config.Open(dir)
 	if err != nil {
@@ -41,7 +46,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *config.Store) {
 		return store.Get().Camera.StreamURL(), store.RecordingsDir()
 	}, filepath.Join(dir, "state"), log.Logger)
 	upd := updater.New(updater.Options{Current: "dev", Log: log.Logger, Enabled: func() bool { return false }})
-	s := &Server{Version: "test", Store: store, Recorder: rec, Updater: upd, Log: log, Static: web.FS}
+	s := &Server{Version: "test", Store: store, Recorder: rec, Updater: upd, Log: log, Static: web.FS, TrustLocal: trustLocal}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	return srv, store
@@ -677,36 +682,55 @@ func TestIsLocal(t *testing.T) {
 	}
 }
 
-// On the PC itself (TrustLocal), the browser is an admin without logging in.
+// On the PC itself (TrustLocal), the browser is a plain user without logging
+// in: the recorder works, the settings and users still need an admin login.
 func TestLocalAccess(t *testing.T) {
-	_, store := newTestServer(t)
-	s := &Server{Version: "test", Store: store, Log: logging.Discard(), Static: web.FS, TrustLocal: true}
-	local := httptest.NewServer(s.Handler())
-	t.Cleanup(local.Close)
-
-	if resp, body := do(t, "GET", local.URL+"/api/settings", ""); resp.StatusCode != 200 {
-		t.Fatalf("settings on the PC = %d %s", resp.StatusCode, body)
-	}
-	if _, body := do(t, "GET", local.URL+"/api/me", ""); !strings.Contains(body, `"local":true`) || !strings.Contains(body, `"role":"admin"`) {
+	local, _ := newServer(t, true)
+	anon := client()
+	if _, body := doWith(t, anon, "GET", local.URL+"/api/me", ""); !strings.Contains(body, `"local":true`) || !strings.Contains(body, `"role":"user"`) {
 		t.Fatalf("me on the PC = %s", body)
 	}
+	if resp, body := doWith(t, anon, "GET", local.URL+"/api/recordings", ""); resp.StatusCode != 200 {
+		t.Fatalf("recordings on the PC = %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := doWith(t, anon, "GET", local.URL+"/api/status", ""); resp.StatusCode != 200 {
+		t.Fatalf("status on the PC = %d", resp.StatusCode)
+	}
+	for _, r := range []struct{ method, path string }{
+		{"GET", "/api/settings"}, {"PUT", "/api/settings"}, {"GET", "/api/users"}, {"POST", "/api/users"}, {"GET", "/api/logs"}, {"POST", "/api/update/check"},
+	} {
+		if resp, _ := doWith(t, anon, r.method, local.URL+r.path, `{"email":"evil@x.pt","role":"admin","password":"password1"}`); resp.StatusCode != 403 {
+			t.Errorf("%s %s on the PC without login = %d, want 403", r.method, r.path, resp.StatusCode)
+		}
+	}
+	if resp, _ := doWith(t, anon, "PUT", local.URL+"/api/me/password", `{"currentPassword":"x","password":"password1"}`); resp.StatusCode != 400 {
+		t.Errorf("me/password on the PC = %d, want 400", resp.StatusCode)
+	}
+
 	// The same request through the tunnel needs a login.
-	req, _ := http.NewRequest("GET", local.URL+"/api/settings", nil)
+	req, _ := http.NewRequest("GET", local.URL+"/api/recordings", nil)
 	req.Header.Set("Cf-Connecting-Ip", "1.2.3.4")
 	if resp, _ := http.DefaultClient.Do(req); resp.StatusCode != 401 {
 		t.Errorf("through the tunnel = %d, want 401", resp.StatusCode)
 	}
-	// Another web page open on the PC can't make changes.
-	req, _ = http.NewRequest("POST", local.URL+"/api/users", strings.NewReader(`{"email":"evil@x.pt","role":"admin","password":"password1"}`))
+	// Another web page open on the PC can't use the recorder (CSRF).
+	req, _ = http.NewRequest("POST", local.URL+"/api/recording/stop", nil)
 	req.Header.Set("Origin", "https://evil.example.com")
 	if resp, _ := http.DefaultClient.Do(req); resp.StatusCode != 401 {
 		t.Errorf("cross-site change = %d, want 401", resp.StatusCode)
 	}
-	if resp, body := do(t, "PUT", local.URL+"/api/me/password", `{"currentPassword":"x","password":"password1"}`); resp.StatusCode != 400 {
-		t.Errorf("me/password on the PC = %d %s, want 400", resp.StatusCode, body)
+
+	// An admin can still log in on the PC, and then is an admin.
+	admin := loginClient(t, local, adminEmail, adminPassword)
+	if resp, _ := doWith(t, admin, "GET", local.URL+"/api/settings", ""); resp.StatusCode != 200 {
+		t.Errorf("settings after login on the PC = %d, want 200", resp.StatusCode)
 	}
-	// It can manage users like an admin.
-	if resp, body := do(t, "POST", local.URL+"/api/users", `{"email":"new@x.pt","role":"userManager","password":"password1"}`); resp.StatusCode != 201 {
-		t.Errorf("create user on the PC = %d %s", resp.StatusCode, body)
+	if _, body := doWith(t, admin, "GET", local.URL+"/api/me", ""); strings.Contains(body, `"local"`) || !strings.Contains(body, `"role":"admin"`) {
+		t.Errorf("me after login on the PC = %s", body)
+	}
+	// Logging out goes back to the local user.
+	doWith(t, admin, "POST", local.URL+"/api/logout", "")
+	if resp, _ := doWith(t, admin, "GET", local.URL+"/api/settings", ""); resp.StatusCode != 403 {
+		t.Errorf("settings after logout on the PC = %d, want 403", resp.StatusCode)
 	}
 }

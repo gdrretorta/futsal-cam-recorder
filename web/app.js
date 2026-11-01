@@ -517,8 +517,10 @@ async function loadMe() {
 // applyAccess shows the login page, the "choose your password" page (when
 // someone else set the password) or the recorder, with the buttons the
 // user's role allows. While there are no users the recorder is open to all.
+let wantLogin = false; // on the PC itself: the user asked to log in
+
 function applyAccess() {
-  const loggedOut = me.authRequired && !me.user;
+  const loggedOut = (me.authRequired && !me.user) || wantLogin;
   const mustChange = !!(me.user && me.user.mustChangePassword);
   const wasMustChange = !$("passwordView").hidden;
   const wasLoggedOut = !$("loginView").hidden || wasMustChange;
@@ -541,13 +543,16 @@ function applyAccess() {
   loginPassword = "";
   if (loggedOut) {
     clearRecorder();
+    $("loginBackBtn").hidden = !wantLogin;
     loginForm.elements.email.focus();
     return;
   }
   $("settingsBtn").hidden = me.authRequired && role() !== "admin";
   $("usersBtn").hidden = !(role() === "admin" || role() === "userManager");
-  // On the PC itself there is no account (admin without a login).
-  $("accountBtn").hidden = !me.user || !!me.local;
+  // On the PC itself without a session, the same button logs in.
+  $("accountBtn").hidden = !me.user;
+  $("accountBtn").title = me.local ? "Iniciar sessão" : "A minha conta";
+  $("accountBtn").setAttribute("aria-label", $("accountBtn").title);
   $("logsBtn").hidden = role() !== "admin";
   $("updateBtn").hidden = role() !== "admin";
   if (wasLoggedOut) refreshStatus().then(refreshSnapshot);
@@ -601,6 +606,7 @@ loginForm.addEventListener("submit", async (ev) => {
     });
     if (me.user.mustChangePassword) loginPassword = loginForm.elements.password.value;
     loginForm.reset();
+    wantLogin = false;
     applyAccess();
   } catch (e) {
     $("loginError").textContent = e.message;
@@ -611,7 +617,19 @@ loginForm.addEventListener("submit", async (ev) => {
 
 const accountForm = $("accountForm");
 
+$("loginBackBtn").addEventListener("click", () => {
+  wantLogin = false;
+  loginForm.reset();
+  $("loginError").hidden = true;
+  applyAccess();
+});
+
 $("accountBtn").addEventListener("click", () => {
+  if (me.local) {
+    wantLogin = true;
+    applyAccess();
+    return;
+  }
   accountForm.reset();
   $("accountEmail").textContent = me.user.email;
   $("accountRole").textContent = ROLES[me.user.role] || me.user.role;

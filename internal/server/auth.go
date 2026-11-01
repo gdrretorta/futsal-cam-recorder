@@ -220,16 +220,21 @@ func (s *Server) require(level access, h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// localUser is whoever uses the browser on the PC itself: an admin without a
-// login (the owner asked for this; whoever sits at the PC owns it anyway).
-var localUser = config.User{ID: "local", Email: "este PC", Role: config.RoleAdmin}
+// localUser is whoever uses the browser on the PC itself without logging in:
+// a plain user, so the recorder works without a login but the settings and
+// the users stay behind an admin login (the owner asked for this).
+var localUser = config.User{ID: "local", Email: "este PC", Role: config.RoleUser}
 
-// currentUser is the local admin on the PC itself, or the user of the session.
+// currentUser is the user of the session or, without one, the local user on
+// the PC itself. A session wins, so an admin can log in on the PC.
 func (s *Server) currentUser(r *http.Request) (config.User, bool) {
+	if u, ok := s.auth.user(r, s.Store); ok {
+		return u, true
+	}
 	if s.TrustLocal && isLocal(r) {
 		return localUser, true
 	}
-	return s.auth.user(r, s.Store)
+	return config.User{}, false
 }
 
 // isLocal reports whether a request comes from a browser on the PC itself.
@@ -285,21 +290,22 @@ type meDTO struct {
 	// AuthRequired is false while there are no users: the recorder is open.
 	AuthRequired bool     `json:"authRequired"`
 	User         *userDTO `json:"user"`
-	// Local is true on the PC itself (see isLocal): admin without a login.
+	// Local is true on the PC itself without a session (see isLocal): a
+	// plain user without a login, who can still log in.
 	Local bool `json:"local,omitempty"`
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	resp := meDTO{AuthRequired: s.Store.HasUsers()}
-	if s.TrustLocal && isLocal(r) {
-		d := toUserDTO(localUser)
-		resp.User, resp.Local = &d, true
-	} else if u, ok := s.auth.user(r, s.Store); ok {
+	if u, ok := s.auth.user(r, s.Store); ok {
 		// The page asks on every load: renewing here keeps someone who uses
 		// the site at least once a week logged in.
 		s.auth.setSession(w, r, u)
 		d := toUserDTO(u)
 		resp.User = &d
+	} else if s.TrustLocal && isLocal(r) {
+		d := toUserDTO(localUser)
+		resp.User, resp.Local = &d, true
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -349,7 +355,7 @@ func (s *Server) changeOwnPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if u.ID == localUser.ID {
-		writeError(w, http.StatusBadRequest, errors.New("no próprio PC não há conta: a palavra-passe muda-se na página Utilizadores"))
+		writeError(w, http.StatusBadRequest, errors.New("sem sessão iniciada não há palavra-passe para mudar: inicie sessão primeiro"))
 		return
 	}
 	var body struct {

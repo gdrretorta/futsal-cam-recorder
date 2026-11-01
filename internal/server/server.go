@@ -2,7 +2,7 @@
 //
 // Access: [user] any logged-in user, [users] admins and user managers,
 // [admin] admins only. A browser on the PC itself (http://localhost:8080) is
-// an admin without logging in (see isLocal). While no user exists, [user] endpoints are open to
+// a [user] without logging in (see isLocal); logging in still works there. While no user exists, [user] endpoints are open to
 // everyone (see accessRecorder). A user whose password was chosen by someone
 // else can only use /api/me, /api/me/password and /api/logout until they
 // change it (403 otherwise). /recordings/{name} is always public, so a
@@ -63,8 +63,9 @@ type Server struct {
 	Updater  *updater.Updater
 	Log      *logging.Logger
 	Static   fs.FS
-	// TrustLocal makes a browser on the PC itself an admin without a login
-	// (see isLocal). Off in tests, where every request comes from loopback.
+	// TrustLocal lets a browser on the PC itself use the recorder without a
+	// login, as a plain user (see isLocal). Off in tests, where every request
+	// comes from loopback.
 	TrustLocal bool
 
 	auth *auth
