@@ -250,6 +250,11 @@ input:not([type=checkbox]), select {
   font: inherit; padding: 8px 10px; border-radius: 8px;
   border: 1px solid var(--border); background: var(--input); color: var(--text); width: 100%;
 }
+/* iOS Safari zooms in on a field whose text is under 16px, and stays zoomed
+   after leaving it: the page then looks shifted and cut on the right. */
+@media (pointer: coarse) {
+  input:not([type=checkbox]), select { font-size: 16px; }
+}
 input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: 0; border-color: var(--accent); }
 .grid2 { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; }
 .grid2:has([name=user]) { grid-template-columns: 1fr 1fr; }
