@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -109,6 +110,34 @@ func Install(name, displayName, description, exePath string) error {
 		return fmt.Errorf("iniciar serviço: %w", err)
 	}
 	return nil
+}
+
+// SetExe makes the existing service start exePath from now on, and sets its
+// display name. Everything else (start type, account, recovery actions) stays
+// as it is. The running process is not affected: the change applies the next
+// time the service starts.
+func SetExe(name, displayName, exePath string) error {
+	m, err := mgr.Connect()
+	if err != nil {
+		return err
+	}
+	defer m.Disconnect()
+	s, err := m.OpenService(name)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	// Same quoting as mgr.CreateService, used by Install.
+	bin, err := windows.UTF16PtrFromString(syscall.EscapeArg(exePath))
+	if err != nil {
+		return err
+	}
+	dn, err := windows.UTF16PtrFromString(displayName)
+	if err != nil {
+		return err
+	}
+	const keep = windows.SERVICE_NO_CHANGE
+	return windows.ChangeServiceConfig(s.Handle, keep, keep, keep, bin, nil, nil, nil, nil, nil, dn)
 }
 
 // Uninstall stops and deletes the service.

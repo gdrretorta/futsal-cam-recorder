@@ -68,12 +68,12 @@ func main() {
 	switch cmd := flag.Arg(0); cmd {
 	case "", "run":
 		if service.IsService() {
-			err = service.Run(serviceName, func(ctx context.Context) (bool, error) { return run(ctx, exe, *dir) })
+			err = service.Run(serviceName, func(ctx context.Context) (bool, error) { return run(ctx, exe, *dir, true) })
 			break
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		var restart bool
-		restart, err = run(ctx, exe, *dir)
+		restart, err = run(ctx, exe, *dir, false)
 		stop()
 		if err == nil && restart {
 			err = reexec(exe)
@@ -111,7 +111,7 @@ func main() {
 
 // run starts everything and blocks until ctx is cancelled or an update asks
 // for a restart.
-func run(ctx context.Context, exe, baseDir string) (restart bool, err error) {
+func run(ctx context.Context, exe, baseDir string, asService bool) (restart bool, err error) {
 	log, err := logging.New(filepath.Join(baseDir, "logs"))
 	if err != nil {
 		return false, err
@@ -124,6 +124,10 @@ func run(ctx context.Context, exe, baseDir string) (restart bool, err error) {
 	cfg := store.Get()
 	ffmpeg := findFFmpeg(cfg.FFmpegPath, filepath.Dir(exe))
 	log.Info("starting", "version", version, "dir", baseDir, "ffmpeg", ffmpeg)
+
+	if asService && renameExe(exe, log) {
+		return true, nil
+	}
 
 	rec := recorder.New(ffmpeg, func() (string, string) {
 		return store.Get().Camera.StreamURL(), store.RecordingsDir()
@@ -188,6 +192,28 @@ func run(ctx context.Context, exe, baseDir string) (restart bool, err error) {
 	httpSrv.Shutdown(shutdownCtx)
 	rec.Shutdown(shutdownCtx)
 	return restart, err
+}
+
+// renameExe moves a PC upgraded by auto-update from 2.8.1 or older, whose
+// service still runs simple-rtsp-recorder.exe, to futsal-cam-recorder.exe. It
+// returns true when the service now points at the new exe and must restart
+// (nothing has started yet, so a recording to resume just waits a few
+// seconds). On failure the app keeps running under the old name, which still
+// updates normally, and tries again at the next start.
+func renameExe(exe string, log *logging.Logger) (restart bool) {
+	newExe, err := updater.MigrateExeName(exe, func(p string) error {
+		return service.SetExe(serviceName, displayName, p)
+	})
+	if err != nil {
+		log.Warn("could not switch to the new exe name, keeping the old one", "err", err)
+		return false
+	}
+	if newExe != "" {
+		log.Info("service switched to the new exe name, restarting", "exe", newExe)
+		return true
+	}
+	updater.CleanupLegacy(exe)
+	return false
 }
 
 // emailAdmins sends a message to the admins, when emails are configured.

@@ -18,3 +18,4 @@ func IsService() bool                 { return false }
 func Run(string, RunFunc) error       { return errUnsupported }
 func Install(_, _, _, _ string) error { return errUnsupported }
 func Uninstall(string) error          { return errUnsupported }
+func SetExe(_, _, _ string) error     { return errUnsupported }
