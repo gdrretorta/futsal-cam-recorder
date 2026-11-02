@@ -407,11 +407,45 @@ const fields = form.elements;
 
 const NO_USERS = "Ainda não existe nenhum utilizador. Crie um administrador no PC: corra o instalador novamente ou execute \"futsal-cam-recorder.exe add-user <email> admin\".";
 
+// The settings are a page of their own (#definicoes), shown in place of the
+// recorder, so the browser's back button returns to the recorder.
+const SETTINGS_HASH = "#definicoes";
+let settingsOpen = false;
+let settingsPushed = false; // we added the history entry, so "back" removes it
+
+function clearSettingsHash() {
+  if (location.hash === SETTINGS_HASH) history.replaceState(null, "", location.pathname + location.search);
+}
+
+function showSettings(open) {
+  settingsOpen = open;
+  applyAccess();
+  if (!open) clearTimeout(loadTunnel.t);
+}
+
+// closeSettings returns to the recorder, also from the address bar's point of view.
+function closeSettings() {
+  if (location.hash === SETTINGS_HASH && settingsPushed) {
+    history.back(); // popstate hides the page
+    return;
+  }
+  clearSettingsHash();
+  showSettings(false);
+}
+
+window.addEventListener("popstate", () => {
+  const want = location.hash === SETTINGS_HASH;
+  if (!want) settingsPushed = false;
+  if (want && !settingsOpen) openSettings();
+  else if (!want && settingsOpen) showSettings(false);
+});
+
 // The settings are admin-only. While there are no users, nobody can open
 // them: explain how to create the first admin.
 async function openSettings() {
   if (!me || !me.user) {
     toast(NO_USERS, true);
+    clearSettingsHash();
     return;
   }
   let s;
@@ -419,6 +453,7 @@ async function openSettings() {
     s = await api("GET", "/api/settings");
   } catch (e) {
     toast(e.message, true);
+    if (!settingsOpen) clearSettingsHash();
     return;
   }
   fields.host.value = s.camera.host;
@@ -445,7 +480,12 @@ async function openSettings() {
   $("settingsError").hidden = true;
   $("testResult").textContent = "";
   $("testImg").hidden = true;
-  $("settingsDlg").showModal();
+  if (location.hash !== SETTINGS_HASH) {
+    history.pushState(null, "", SETTINGS_HASH);
+    settingsPushed = true;
+  }
+  showSettings(true);
+  window.scrollTo(0, 0);
   loadTunnel();
 }
 
@@ -491,7 +531,7 @@ const TUNNEL_STATES = {
 
 async function loadTunnel() {
   clearTimeout(loadTunnel.t);
-  if (!$("settingsDlg").open) return;
+  if (!settingsOpen) return;
   let t;
   try {
     t = await api("GET", "/api/tunnel");
@@ -546,7 +586,7 @@ form.addEventListener("submit", async (ev) => {
   ev.preventDefault();
   try {
     await api("PUT", "/api/settings", formSettings());
-    $("settingsDlg").close();
+    closeSettings();
     toast("Definições guardadas");
     refreshStatus().then(refreshSnapshot);
   } catch (e) {
@@ -584,8 +624,14 @@ function applyAccess() {
   const wasLoggedOut = !$("loginView").hidden || wasMustChange;
   $("loginView").hidden = !loggedOut;
   $("passwordView").hidden = !mustChange;
-  for (const id of ["app", "topbarActions"]) $(id).hidden = loggedOut || mustChange;
-  document.querySelector("body > footer").hidden = loggedOut || mustChange;
+  if ((loggedOut || mustChange) && settingsOpen) {
+    settingsOpen = false;
+    clearSettingsHash();
+  }
+  $("topbarActions").hidden = loggedOut || mustChange;
+  $("app").hidden = loggedOut || mustChange || settingsOpen;
+  $("settingsView").hidden = !settingsOpen;
+  document.querySelector("body > footer").hidden = loggedOut || mustChange || settingsOpen;
   if (mustChange) {
     if (wasMustChange) return; // don't wipe what is being typed
     clearRecorder();
@@ -606,6 +652,8 @@ function applyAccess() {
     return;
   }
   $("settingsBtn").hidden = me.authRequired && role() !== "admin";
+  // Lost access to the settings (role changed, logged out on the PC…).
+  if (settingsOpen && $("settingsBtn").hidden) closeSettings();
   $("usersBtn").hidden = !(role() === "admin" || role() === "userManager");
   // On the PC itself without a session, the same button logs in.
   $("accountBtn").hidden = !me.user;
@@ -619,6 +667,7 @@ function applyAccess() {
 // Nothing of the recorder stays on screen after logging out.
 function clearRecorder() {
   document.querySelectorAll("dialog[open]").forEach((d) => d.close());
+  clearTimeout(loadTunnel.t);
   status = null;
   recordings = [];
   listKey = "";
@@ -861,7 +910,14 @@ $("updateBtn").addEventListener("click", async () => {
 
 // ---------- Wiring ----------
 
-$("settingsBtn").addEventListener("click", openSettings);
+$("settingsBtn").addEventListener("click", () => (settingsOpen ? closeSettings() : openSettings()));
+document.querySelectorAll("[data-settings-back]").forEach((b) => b.addEventListener("click", closeSettings));
+// The section links scroll without touching the address (it holds #definicoes).
+document.querySelectorAll(".settings-nav a").forEach((a) =>
+  a.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    document.querySelector(a.getAttribute("href")).scrollIntoView({ behavior: "smooth", block: "start" });
+  }));
 document.querySelectorAll("[data-open-settings]").forEach((b) => b.addEventListener("click", openSettings));
 document.querySelectorAll("dialog [data-close]").forEach((b) =>
   b.addEventListener("click", () => b.closest("dialog").close()));
@@ -879,4 +935,12 @@ setInterval(renderTimer, 500);
 setInterval(() => { if (!document.hidden) refreshStatus(); }, STATUS_INTERVAL);
 setInterval(() => { if (!updating) refreshSnapshot(); }, SNAPSHOT_INTERVAL);
 setInterval(() => { if (!document.hidden) loadRecordings(); }, 60000);
-loadMe().then(() => refreshStatus()).then(refreshSnapshot);
+loadMe()
+  .then(() => {
+    // Reloaded on the settings page: open it again if this user may.
+    if (location.hash !== SETTINGS_HASH) return;
+    if (me && me.user && !$("app").hidden && !$("settingsBtn").hidden) openSettings();
+    else clearSettingsHash();
+  })
+  .then(() => refreshStatus())
+  .then(refreshSnapshot);

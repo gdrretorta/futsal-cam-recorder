@@ -162,6 +162,38 @@ h3 { font-size: 1rem; }
 .role { font-size: .75rem; font-weight: 600; color: var(--muted); margin-left: 6px; }
 .role.admin { color: var(--accent); }
 
+/* Settings page */
+.settings-page { flex: 1; width: 100%; max-width: 1200px; margin: 0 auto; padding: 20px 20px 0; }
+.settings-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.settings-head h2 { font-size: 1.15rem; }
+.settings-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.settings-nav a {
+  font-size: .85rem; font-weight: 500; padding: 5px 12px; border-radius: 999px; text-decoration: none;
+  color: var(--text); border: 1px solid var(--border); background: var(--card);
+}
+.settings-nav a:hover { border-color: var(--muted); }
+/* Two columns on wide screens; a section never splits across them. */
+.settings-grid { columns: 2 420px; column-gap: 20px; }
+.settings-section { break-inside: avoid; margin-bottom: 20px; scroll-margin-top: 80px; }
+.settings-section h3 { margin-bottom: 12px; }
+.settings-section fieldset { margin: 0; }
+.settings-section a { color: var(--accent); }
+.settings-bar {
+  position: sticky; bottom: 0; z-index: 4;
+  margin: 0 -20px; padding: 12px 20px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(6px);
+  border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap;
+}
+.settings-bar .state-error { margin: 0; flex: 1; min-width: 200px; }
+.settings-actions { display: flex; gap: 8px; }
+@media (max-width: 860px) {
+  .settings-page { padding: 16px 16px 0; }
+  .settings-grid { column-gap: 16px; }
+  .settings-section { margin-bottom: 16px; }
+  .settings-bar { margin: 0 -16px; padding: 12px 16px; }
+}
+
 /* Buttons */
 .btn {
   font: inherit; font-weight: 500; padding: 8px 14px; border-radius: 9px; cursor: pointer;

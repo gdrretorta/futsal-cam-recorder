@@ -91,6 +91,92 @@
     </section>
   </main>
 
+  <main id="settingsView" class="settings-page" hidden>
+    <form id="settingsForm">
+      <div class="settings-head">
+        <button type="button" class="icon-btn" data-settings-back title="Voltar ao gravador" aria-label="Voltar ao gravador">
+          <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <h2>Definições</h2>
+      </div>
+      <nav class="settings-nav" aria-label="Secções">
+        <a href="#s-camera">Câmara</a>
+        <a href="#s-recordings">Gravações</a>
+        <a href="#s-general">Geral</a>
+        <a href="#s-notify">Avisos por email</a>
+        <a href="#s-tunnel">Túnel Cloudflare</a>
+      </nav>
+      <div class="settings-grid">
+        <section id="s-camera" class="card settings-section">
+          <h3>Câmara</h3>
+          <fieldset>
+            <div class="grid2">
+              <label>Endereço IP<input name="host" placeholder="192.168.1.100" required></label>
+              <label>Porta<input name="port" type="number" min="1" max="65535" value="554" required></label>
+            </div>
+            <label>Caminho do stream<input name="path" placeholder="live1.sdp"></label>
+            <div class="grid2">
+              <label>Utilizador<input name="user" autocomplete="off"></label>
+              <label>Palavra-passe<input name="password" type="password" autocomplete="new-password"></label>
+            </div>
+            <div class="test-row">
+              <button type="button" id="testBtn" class="btn">Testar ligação</button>
+              <span id="testResult" class="muted"></span>
+            </div>
+            <img id="testImg" class="test-img" alt="" hidden>
+          </fieldset>
+        </section>
+        <section id="s-recordings" class="card settings-section">
+          <h3>Gravações</h3>
+          <fieldset>
+            <label>Pasta<input name="recordingsDir" required></label>
+            <label>Apagar gravações com mais de (dias, 0 = nunca)<input name="retentionDays" type="number" min="0" value="0"></label>
+          </fieldset>
+        </section>
+        <section id="s-general" class="card settings-section">
+          <h3>Geral</h3>
+          <fieldset>
+            <label>Título<input name="title"></label>
+            <label>Endereço público do site (links nos emails e confirmação do túnel)<input name="notifySite" type="url" placeholder="https://futsal.retorta.com"></label>
+            <label class="check"><input name="autoUpdate" type="checkbox"> Atualizar o gravador automaticamente (só quando não há gravações)</label>
+          </fieldset>
+        </section>
+        <section id="s-notify" class="card settings-section">
+          <h3>Avisos por email</h3>
+          <fieldset>
+            <p class="muted hint">Os avisos vão para todos os administradores, pela <a href="https://resend.com" target="_blank" rel="noopener">Resend</a>.</p>
+            <label>Avisar quando uma gravação passa de (horas, 0 = nunca)<input name="notifyHours" type="number" min="0" max="48" value="3"></label>
+            <label>API key da Resend<input name="notifyKey" type="password" autocomplete="off" placeholder="re_…"></label>
+            <label>Remetente (num domínio verificado na Resend)<input name="notifyFrom" placeholder="Gravador &lt;gravador@retorta.com&gt;"></label>
+            <div class="test-row">
+              <button type="button" id="notifyTestBtn" class="btn">Enviar email de teste</button>
+              <span id="notifyTestResult" class="muted"></span>
+            </div>
+          </fieldset>
+        </section>
+        <section id="s-tunnel" class="card settings-section">
+          <h3>Túnel Cloudflare</h3>
+          <fieldset>
+            <p id="tunnelInfo" class="muted hint"></p>
+            <p id="tunnelState" class="muted hint" hidden></p>
+            <label class="check"><input name="tunnelAuto" type="checkbox"> Atualizar o cloudflared automaticamente (às segundas-feiras às 4h, depois de terminarem as gravações)</label>
+            <div class="test-row">
+              <button type="button" id="tunnelUpdateBtn" class="btn">Atualizar agora</button>
+              <span class="muted">Espera pelo fim das gravações. O site fica indisponível uns segundos.</span>
+            </div>
+          </fieldset>
+        </section>
+      </div>
+      <div class="settings-bar">
+        <p id="settingsError" class="state-error" hidden></p>
+        <div class="settings-actions">
+          <button type="button" class="btn" data-settings-back>Cancelar</button>
+          <button type="submit" class="btn primary">Guardar</button>
+        </div>
+      </div>
+    </form>
+  </main>
+
   <footer class="footer" hidden>
     <div id="disk" class="disk" hidden>
       <div class="disk-bar"><span id="diskFill"></span></div>
@@ -120,65 +206,6 @@
     </form>
   </dialog>
 
-  <dialog id="settingsDlg" class="dlg">
-    <form id="settingsForm">
-      <div class="dlg-head"><h3>Definições</h3><button type="button" class="icon-btn" data-close aria-label="Fechar">✕</button></div>
-      <fieldset>
-        <legend>Câmara</legend>
-        <div class="grid2">
-          <label>Endereço IP<input name="host" placeholder="192.168.1.100" required></label>
-          <label>Porta<input name="port" type="number" min="1" max="65535" value="554" required></label>
-        </div>
-        <label>Caminho do stream<input name="path" placeholder="live1.sdp"></label>
-        <div class="grid2">
-          <label>Utilizador<input name="user" autocomplete="off"></label>
-          <label>Palavra-passe<input name="password" type="password" autocomplete="new-password"></label>
-        </div>
-        <div class="test-row">
-          <button type="button" id="testBtn" class="btn">Testar ligação</button>
-          <span id="testResult" class="muted"></span>
-        </div>
-        <img id="testImg" class="test-img" alt="" hidden>
-      </fieldset>
-      <fieldset>
-        <legend>Gravações</legend>
-        <label>Pasta<input name="recordingsDir" required></label>
-        <label>Apagar gravações com mais de (dias, 0 = nunca)<input name="retentionDays" type="number" min="0" value="0"></label>
-      </fieldset>
-      <fieldset>
-        <legend>Avisos por email</legend>
-        <p class="muted hint">Os avisos vão para todos os administradores, pela <a href="https://resend.com" target="_blank" rel="noopener">Resend</a>.</p>
-        <label>Avisar quando uma gravação passa de (horas, 0 = nunca)<input name="notifyHours" type="number" min="0" max="48" value="3"></label>
-        <label>API key da Resend<input name="notifyKey" type="password" autocomplete="off" placeholder="re_…"></label>
-        <label>Remetente (num domínio verificado na Resend)<input name="notifyFrom" placeholder="Gravador &lt;gravador@retorta.com&gt;"></label>
-        <div class="test-row">
-          <button type="button" id="notifyTestBtn" class="btn">Enviar email de teste</button>
-          <span id="notifyTestResult" class="muted"></span>
-        </div>
-      </fieldset>
-      <fieldset>
-        <legend>Túnel Cloudflare</legend>
-        <p id="tunnelInfo" class="muted hint"></p>
-        <p id="tunnelState" class="muted hint" hidden></p>
-        <label class="check"><input name="tunnelAuto" type="checkbox"> Atualizar o cloudflared automaticamente (às segundas-feiras às 4h, depois de terminarem as gravações)</label>
-        <div class="test-row">
-          <button type="button" id="tunnelUpdateBtn" class="btn">Atualizar agora</button>
-          <span class="muted">Espera pelo fim das gravações. O site fica indisponível uns segundos.</span>
-        </div>
-      </fieldset>
-      <fieldset>
-        <legend>Geral</legend>
-        <label>Título<input name="title"></label>
-        <label>Endereço público do site (links nos emails e confirmação do túnel)<input name="notifySite" type="url" placeholder="https://futsal.retorta.com"></label>
-        <label class="check"><input name="autoUpdate" type="checkbox"> Atualizar o gravador automaticamente (só quando não há gravações)</label>
-      </fieldset>
-      <p id="settingsError" class="state-error" hidden></p>
-      <div class="dlg-actions">
-        <button type="button" class="btn" data-close>Cancelar</button>
-        <button type="submit" class="btn primary">Guardar</button>
-      </div>
-    </form>
-  </dialog>
 
   <dialog id="accountDlg" class="dlg narrow">
     <form id="accountForm">
