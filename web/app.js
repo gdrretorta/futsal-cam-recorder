@@ -912,6 +912,16 @@ $("updateBtn").addEventListener("click", async () => {
 
 $("settingsBtn").addEventListener("click", () => (settingsOpen ? closeSettings() : openSettings()));
 document.querySelectorAll("[data-settings-back]").forEach((b) => b.addEventListener("click", closeSettings));
+// The logo and title go back to the recorder (the "home"), e.g. from the
+// settings page, without reloading the page.
+$("homeLink").addEventListener("click", (ev) => {
+  if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button !== 0) return; // new tab/window
+  ev.preventDefault();
+  document.querySelectorAll("dialog[open]").forEach((d) => d.close());
+  if (settingsOpen) closeSettings();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
 // The section links scroll without touching the address (it holds #definicoes).
 document.querySelectorAll(".settings-nav a").forEach((a) =>
   a.addEventListener("click", (ev) => {

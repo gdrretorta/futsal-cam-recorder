@@ -5,15 +5,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Futsal Cam Recorder</title>
+  <meta name="theme-color" content="#f4f4f5" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0b0b0d" media="(prefers-color-scheme: dark)">
+  <!-- Installable as an app on a phone (Android: manifest; iOS: apple-*). -->
+  <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="icon" href="icon-192.png" type="image/png" sizes="192x192">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Futsal Cam">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">
+    <a id="homeLink" class="brand" href="./" title="Página inicial">
       <img src="icon.svg" alt="" width="28" height="28">
       <h1 id="title">Futsal Cam Recorder</h1>
-    </div>
+    </a>
     <div id="topbarActions" class="topbar-actions" hidden>
       <span id="pill" class="pill">—</span>
       <button id="usersBtn" class="icon-btn" title="Utilizadores" aria-label="Utilizadores" hidden>

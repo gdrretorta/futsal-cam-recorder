@@ -24,7 +24,7 @@ internal/tunnel             keeps cloudflared (the tunnel connector, a Windows s
 internal/notify             emails to the admins through the Resend API; Watcher = long-recording alert
 internal/logging            slog → rotating file logs/recorder.log + stdout + in-memory tail for /api/logs
 internal/sysinfo            free disk space (windows / unix)
-web/                        index.html, app.js, style.css, icon.svg (embedded)
+web/                        index.html, app.js, style.css, icons, manifest.webmanifest (installable app; embedded)
 scripts/fake-camera.sh      local RTSP test camera (mediamtx + ffmpeg test pattern)
 install.ps1                 one-time installer/upgrader (irm | iex)
 .github/workflows           ci.yml (fmt, vet linux+windows, test -race, build), release.yml
@@ -69,7 +69,7 @@ To run the app against the fake camera, see `.claude/skills/run-app/SKILL.md`.
 - Windows-only code goes in `_windows.go` files, with a `_other.go` counterpart (`//go:build !windows`).
 - User-facing error messages are Portuguese, because they are shown in the UI as they are.
 - A Windows service has **no console**: writes to stdout/stderr fail. Never let a stdout failure stop other output (that is why `logging` uses `allWriters` instead of `io.MultiWriter`; in v2.0.x the "Registos" page was empty because of it), and never rely on console output for anything the service needs.
-- The site sits behind Cloudflare, which caches `.css`, `.js` and `.svg` by extension. `index.html` is served with `Cache-Control: no-store`, and every asset it references is rewritten to `name?v=<content hash>` (`internal/server/static.go`). A new file in `web/` must be added both to `//go:embed` in `web/embed.go` and to `assets` in `static.go`. Never reference an asset without the hash: in v2.0.0, Cloudflare kept serving the 1.x `style.css`, and the public page rendered unstyled.
+- The site sits behind Cloudflare, which caches `.css`, `.js` and `.svg` by extension. `index.html` is served with `Cache-Control: no-store`, and every asset it references is rewritten to `name?v=<content hash>` (`internal/server/static.go`). A new file in `web/` must be added both to `//go:embed` in `web/embed.go` and to `assets` in `static.go`. The manifest references the icons, so it is rewritten the same way (`rewritten` in `static.go`) and listed after them. Never reference an asset without the hash: in v2.0.0, Cloudflare kept serving the 1.x `style.css`, and the public page rendered unstyled.
 
 ## Adding things
 

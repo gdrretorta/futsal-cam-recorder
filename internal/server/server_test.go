@@ -539,7 +539,7 @@ func TestClientIP(t *testing.T) {
 	}
 }
 
-// The page must reference every asset by a content hash so that no cache
+// The page (or the manifest) must reference every asset by a content hash so that no cache
 // (Cloudflare kept serving the 1.x style.css) can serve another version.
 func TestStaticAssetsAreVersioned(t *testing.T) {
 	srv, _ := newTestServer(t)
@@ -547,18 +547,23 @@ func TestStaticAssetsAreVersioned(t *testing.T) {
 	if cc := resp.Header.Get("Cache-Control"); cc != "no-store" {
 		t.Errorf("index Cache-Control = %q, want no-store", cc)
 	}
+	// Some icons are only referenced by the manifest.
+	refs := page + manifestBody(t, srv)
 	for _, name := range assets {
 		data, err := fs.ReadFile(web.FS, name)
 		if err != nil {
 			t.Fatal(err)
 		}
+		if rewritten[name] {
+			data = []byte(manifestBody(t, srv))
+		}
 		sum := sha256.Sum256(data)
 		url := name + "?v=" + hex.EncodeToString(sum[:6])
-		if !strings.Contains(page, `"`+url+`"`) {
-			t.Errorf("index.html does not reference %s", url)
+		if !strings.Contains(refs, `"`+url+`"`) {
+			t.Errorf("neither index.html nor the manifest reference %s", url)
 		}
-		if strings.Contains(page, `"`+name+`"`) {
-			t.Errorf("index.html still has an unversioned reference to %s", name)
+		if strings.Contains(refs, `"`+name+`"`) {
+			t.Errorf("unversioned reference to %s", name)
 		}
 		resp, body := do(t, "GET", srv.URL+"/"+url, "")
 		if resp.StatusCode != 200 || body != string(data) {
@@ -573,6 +578,67 @@ func TestStaticAssetsAreVersioned(t *testing.T) {
 	}
 	if resp, _ := do(t, "GET", srv.URL+"/style.css", ""); !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/css") {
 		t.Errorf("style.css Content-Type = %q", resp.Header.Get("Content-Type"))
+	}
+}
+
+// manifestBody returns the web app manifest as the page references it.
+func manifestBody(t *testing.T, srv *httptest.Server) string {
+	t.Helper()
+	_, page := do(t, "GET", srv.URL+"/", "")
+	i := strings.Index(page, `href="manifest.webmanifest?v=`)
+	if i < 0 {
+		t.Fatal("index.html does not link the manifest")
+	}
+	url := page[i+len(`href="`):]
+	url = url[:strings.Index(url, `"`)]
+	resp, body := do(t, "GET", srv.URL+"/"+url, "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET %s = %d", url, resp.StatusCode)
+	}
+	return body
+}
+
+// The app can be installed on a phone: the manifest and the icons load
+// without logging in, and the manifest references the icons by hash.
+func TestWebAppManifest(t *testing.T) {
+	srv, _ := newTestServer(t)
+	_, page := do(t, "GET", srv.URL+"/", "")
+	for _, want := range []string{`rel="manifest"`, `rel="apple-touch-icon" href="apple-touch-icon.png?v=`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("index.html lacks %s", want)
+		}
+	}
+	body := manifestBody(t, srv)
+	var m struct {
+		StartURL string `json:"start_url"`
+		Display  string `json:"display"`
+		Icons    []struct {
+			Src, Sizes, Purpose string
+		} `json:"icons"`
+	}
+	if err := json.Unmarshal([]byte(body), &m); err != nil {
+		t.Fatalf("manifest is not JSON: %v\n%s", err, body)
+	}
+	if m.StartURL != "./" || m.Display != "standalone" || len(m.Icons) == 0 {
+		t.Errorf("manifest = %+v", m)
+	}
+	var big, maskable bool
+	for _, icon := range m.Icons {
+		if !strings.Contains(icon.Src, "?v=") {
+			t.Errorf("icon %s is not versioned", icon.Src)
+		}
+		resp, _ := do(t, "GET", srv.URL+"/"+icon.Src, "")
+		if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "image/") {
+			t.Errorf("GET %s = %d %s", icon.Src, resp.StatusCode, resp.Header.Get("Content-Type"))
+		}
+		big = big || icon.Sizes == "512x512"
+		maskable = maskable || icon.Purpose == "maskable"
+	}
+	if !big || !maskable {
+		t.Errorf("manifest needs a 512x512 icon and a maskable one: %+v", m.Icons)
+	}
+	if resp, _ := do(t, "GET", srv.URL+"/manifest.webmanifest", ""); resp.Header.Get("Content-Type") != "application/manifest+json" {
+		t.Errorf("manifest Content-Type = %q", resp.Header.Get("Content-Type"))
 	}
 }
 
