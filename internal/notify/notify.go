@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/config"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/config"
 )
 
 // ResendURL is the endpoint emails are posted to (a variable for tests).

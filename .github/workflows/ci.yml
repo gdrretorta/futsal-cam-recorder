@@ -30,7 +30,7 @@ jobs:
         run: go test -race ./...
 
       - name: Build Windows executable
-        run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o simple-rtsp-recorder.exe .
+        run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o futsal-cam-recorder.exe .
 
       - name: Check web UI syntax
         run: node --check web/app.js

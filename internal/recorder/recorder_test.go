@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/logging"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/logging"
 )
 
 func requireFFmpeg(t *testing.T) string {

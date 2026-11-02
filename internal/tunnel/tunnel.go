@@ -31,8 +31,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/config"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/updater"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/config"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/updater"
 )
 
 // AssetName is the cloudflared release asset for Windows.

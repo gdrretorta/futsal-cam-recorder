@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/config"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/logging"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/config"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/logging"
 )
 
 func testConfig() config.Config {

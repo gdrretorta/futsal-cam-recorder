@@ -1,4 +1,4 @@
-# 🎥 Simple RTSP Recorder
+# 🎥 Futsal Cam Recorder
 
 Records an RTSP camera to MP4 files on a Windows PC, controlled from a web page.
 A single executable that runs as a Windows service and **updates itself** from GitHub releases. Updates are only installed when nothing is recording.
@@ -20,7 +20,7 @@ A single executable that runs as a Windows service and **updates itself** from G
 Run PowerShell **as Administrator**:
 
 ```powershell
-irm https://raw.githubusercontent.com/joaoopereira/simple-rtsp-recorder/development/install.ps1 | iex
+irm https://raw.githubusercontent.com/gdrretorta/futsal-cam-recorder/development/install.ps1 | iex
 ```
 
 The installer asks for the **email and password of the first admin**. Open `http://localhost:8080`, log in, set up the camera (⚙️) and add the other users (👥).
@@ -30,7 +30,7 @@ The same command upgrades an existing installation, including 1.x (Node.js) inst
 To create a user or reset its password from the PC (role `admin`, `userManager` or `user`), run this as Administrator, in the install folder:
 
 ```powershell
-'nova-palavra-passe' | .\simple-rtsp-recorder.exe add-user joao@exemplo.pt admin
+'nova-palavra-passe' | .\futsal-cam-recorder.exe add-user joao@exemplo.pt admin
 ```
 
 On the PC itself (`http://localhost:8080`) the recorder works without logging in. The settings and users still need an admin login (the 👤 button).
@@ -40,9 +40,9 @@ Upgrades from 2.6 or older turn the old admin password into an admin user with t
 <details>
 <summary>Manual install</summary>
 
-1. Download `simple-rtsp-recorder-win-x64.zip` from [Releases](https://github.com/joaoopereira/simple-rtsp-recorder/releases) and extract it.
-2. As Administrator: `simple-rtsp-recorder.exe install`
-3. To remove the service: `simple-rtsp-recorder.exe uninstall`
+1. Download `futsal-cam-recorder-win-x64.zip` from [Releases](https://github.com/gdrretorta/futsal-cam-recorder/releases) and extract it.
+2. As Administrator: `futsal-cam-recorder.exe install`
+3. To remove the service: `futsal-cam-recorder.exe uninstall`
 
 </details>
 
@@ -82,7 +82,7 @@ Requires Go and ffmpeg.
 go test ./...                              # unit + ffmpeg integration tests
 scripts/fake-camera.sh &                   # fake camera at rtsp://127.0.0.1:8554/live1.sdp
 go run . -dir ./tmp                        # http://localhost:8080
-GOOS=windows go build -o simple-rtsp-recorder.exe .
+GOOS=windows go build -o futsal-cam-recorder.exe .
 ```
 
 See [CLAUDE.md](CLAUDE.md) for the architecture.

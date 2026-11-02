@@ -18,7 +18,7 @@ All notable changes to this project will be documented in this file. Generated b
 
 """
 body = """
-{%- set repo = "https://github.com/joaoopereira/simple-rtsp-recorder" -%}
+{%- set repo = "https://github.com/gdrretorta/futsal-cam-recorder" -%}
 {% if version -%}
 ## [{{ version | trim_start_matches(pat="v") }}]({% if previous.version %}{{ repo }}/compare/{{ previous.version }}...{{ version }}{% else %}{{ repo }}/releases/tag/{{ version }}{% endif %}) ({{ timestamp | date(format="%Y-%m-%d") }})
 {% else -%}

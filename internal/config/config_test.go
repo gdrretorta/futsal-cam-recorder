@@ -126,3 +126,20 @@ func TestStorePicksUpExternalChanges(t *testing.T) {
 		t.Fatalf("user lost after update: %v", err)
 	}
 }
+
+func TestValidateRenamesLegacyTitle(t *testing.T) {
+	for in, want := range map[string]string{
+		"Simple RTSP Recorder": "Futsal Cam Recorder",
+		"":                     "Futsal Cam Recorder",
+		"Futsal Retorta":       "Futsal Retorta",
+	} {
+		c := Default()
+		c.Title = in
+		if err := c.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		if c.Title != want {
+			t.Errorf("title %q: got %q, want %q", in, c.Title, want)
+		}
+	}
+}

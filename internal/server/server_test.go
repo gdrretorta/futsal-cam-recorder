@@ -13,13 +13,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/config"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/logging"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/notify"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/recorder"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/tunnel"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/updater"
-	"github.com/joaoopereira/simple-rtsp-recorder/web"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/config"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/logging"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/notify"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/recorder"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/tunnel"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/updater"
+	"github.com/gdrretorta/futsal-cam-recorder/web"
 )
 
 func newTestServer(t *testing.T) (*httptest.Server, *config.Store) {
@@ -199,7 +199,7 @@ func TestStatusAndStatic(t *testing.T) {
 	srv, _ := newTestServer(t)
 	// Without login, only what a page needs to reload after an update.
 	resp, body := do(t, "GET", srv.URL+"/api/status", "")
-	if resp.StatusCode != 200 || body != `{"loginRequired":true,"title":"Simple RTSP Recorder","version":"test"}`+"\n" {
+	if resp.StatusCode != 200 || body != `{"loginRequired":true,"title":"Futsal Cam Recorder","version":"test"}`+"\n" {
 		t.Fatalf("anonymous status = %d %s", resp.StatusCode, body)
 	}
 	c := adminClient(t, srv)

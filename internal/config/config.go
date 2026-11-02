@@ -61,7 +61,7 @@ type Config struct {
 // Default returns the settings used when no config file exists.
 func Default() Config {
 	return Config{
-		Title:         "Simple RTSP Recorder",
+		Title:         "Futsal Cam Recorder",
 		Port:          8080,
 		Camera:        Camera{Port: 554},
 		RecordingsDir: "recordings",
@@ -134,10 +134,15 @@ func Redact(raw string) string {
 	return u.String()
 }
 
+// legacyTitle is the default title before the app was renamed.
+const legacyTitle = "Simple RTSP Recorder"
+
 // Validate checks the settings and fills in defaults for zero values.
 func (c *Config) Validate() error {
 	d := Default()
-	if strings.TrimSpace(c.Title) == "" {
+	// The app was called Simple RTSP Recorder until 2.8: a title left at
+	// that default follows the new name.
+	if strings.TrimSpace(c.Title) == "" || c.Title == legacyTitle {
 		c.Title = d.Title
 	}
 	if c.Port == 0 {

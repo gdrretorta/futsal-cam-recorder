@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Simple RTSP Recorder records one RTSP camera (a futsal pitch) to MP4 files on a
+Futsal Cam Recorder records one RTSP camera (a futsal pitch) to MP4 files on a
 Windows PC on the same LAN as the camera. It is controlled from a web page that is
 published at https://futsal.retorta.com through a Cloudflare Tunnel. The owner
 can't easily get to the PC, so **auto-update is critical**: never break it.
@@ -30,7 +30,7 @@ install.ps1                 one-time installer/upgrader (irm | iex)
 .github/workflows           ci.yml (fmt, vet linux+windows, test -race, build), release.yml
 ```
 
-Runtime files in the install folder: `simple-rtsp-recorder.exe`, `ffmpeg.exe`,
+Runtime files in the install folder: `futsal-cam-recorder.exe` (or `simple-rtsp-recorder.exe`, see below), `ffmpeg.exe`,
 `config.json`, `recording.state` (present while a recording should be running, so it
 resumes after a restart), `session.key` (signs login sessions), `logs/`, `recordings/`.
 
@@ -38,9 +38,10 @@ resumes after a restart), `session.key` (signs login sessions), `logs/`, `record
 
 Installed PCs depend on these. Changing any of them strands the PC on the old version:
 
-- Release assets are named `simple-rtsp-recorder.exe`, `checksums.txt` (sha256sum format) and `simple-rtsp-recorder-win-x64.zip`. See `updater.AssetName` and `release.yml`.
-- The repo is `joaoopereira/simple-rtsp-recorder` and releases use semver tags `vX.Y.Z` (`updater.Newer`).
-- The service name is `SimpleRTSPRecorder`. Restart after an update relies on the SCM recovery actions set in `service.Install`, together with a non-zero exit from the service.
+- Release assets are named `futsal-cam-recorder.exe`, `checksums.txt` (sha256sum format) and `futsal-cam-recorder-win-x64.zip`, plus `simple-rtsp-recorder.exe`, a copy of the exe under the name it had until 2.8.1: PCs on 2.8.1 or older look for that asset, so it must stay in every release. See `updater.AssetName` and `release.yml`.
+- The repo is `gdrretorta/futsal-cam-recorder` (until 2.8.1 it was `joaoopereira/simple-rtsp-recorder`; GitHub redirects the old name, which is what lets those PCs find new releases, so never create a repo at the old name) and releases use semver tags `vX.Y.Z` (`updater.Newer`).
+- The service name is `SimpleRTSPRecorder` (kept from before the rename; only the display name is "Futsal Cam Recorder"). Restart after an update relies on the SCM recovery actions set in `service.Install`, together with a non-zero exit from the service.
+- On a PC upgraded by auto-update from 2.8.1 or older, the exe is still `simple-rtsp-recorder.exe`: the updater replaces the running exe in place, whatever its name. Running `install.ps1` again switches the service to `futsal-cam-recorder.exe` and deletes the old one. Never assume the exe's name.
 - `config.json` stays backward compatible: only add fields, with defaults in `config.Default()`.
 - Recording file names follow `2006-01-02_150405.mp4`. The UI parses the date from the name.
 
@@ -51,7 +52,7 @@ gofmt -l .                          # must print nothing
 go vet ./... && GOOS=windows go vet ./...   # always vet the windows build too
 go test -race ./...                 # recorder tests need ffmpeg on PATH (skipped otherwise)
 node --check web/app.js
-GOOS=windows GOARCH=amd64 go build -o simple-rtsp-recorder.exe .
+GOOS=windows GOARCH=amd64 go build -o futsal-cam-recorder.exe .
 ```
 
 `go.mod` requires Go 1.26 (needed by `golang.org/x/sys`). If the installed Go is older, run commands with `GOTOOLCHAIN=auto`, which downloads the right toolchain from the Go proxy.
@@ -86,7 +87,7 @@ To run the app against the fake camera, see `.claude/skills/run-app/SKILL.md`.
 - **On the PC itself, the recorder needs no login** (the owner asked for this): a browser at `http://localhost:8080` without a session is a plain `user` (`localUser`, `Server.TrustLocal`, `isLocal` in `auth.go`). Settings and users still need an admin login, also on the PC (the header button logs in there; a session always wins over the local user). Never make the local user more than a `user`. cloudflared runs on the same PC, so tunnel traffic also comes from loopback: `isLocal` also needs no Cloudflare headers (`Cf-Connecting-Ip`, `Cf-Ray`…) and a localhost Host (which also stops DNS rebinding), and a change (non-GET) needs the page's own `Origin`/`Sec-Fetch-Site` so other web pages open on the PC can't use it (CSRF). Never relax these checks. Tests run with `TrustLocal` off, because httptest connects from loopback.
 - **No users = open mode.** While `users` is empty, `accessRecorder` endpoints are open to everyone (as before 2.7) and nothing else is reachable. That way an automatic update can never lock the owner out of the PC.
 - **Upgrade from ≤ 2.6:** the old `adminPasswordHash` becomes an admin user (`config.MigratedAdminEmail`, same password) when `config.json` is loaded (`migrateUsers`), and is then cleared.
-- **The first admin is never created from the UI**, because the site is public and the first visitor would become admin. It is created on the PC, either by `install.ps1` (which asks for email and password when there is no admin) or with `echo <pw> | simple-rtsp-recorder.exe add-user <email> admin`. `set-admin-password` still works (it sets the first admin's password).
+- **The first admin is never created from the UI**, because the site is public and the first visitor would become admin. It is created on the PC, either by `install.ps1` (which asks for email and password when there is no admin) or with `echo <pw> | futsal-cam-recorder.exe add-user <email> admin`. `set-admin-password` still works (it sets the first admin's password).
 - **User management rules** (`canManage` in `users.go`, plus `config.Store`): only admins create, edit, promote to or delete admins and userManagers; a userManager only manages plain users (the owner asked for this). Nobody can delete their own account. The last admin can't be deleted or demoted. Changing your own password needs the current one, and the new one must differ.
 - **Password chosen by someone else must be changed.** Creating a user from the UI, or resetting someone else's password, sets `mustChangePassword`. Until the user picks their own (`PUT /api/me/password`, level `accessAccount`), `require` answers 403 to everything else and `/api/status` returns the public answer; the page shows the "Escolha a sua palavra-passe" screen. Users made with `add-user` on the PC don't get the flag.
 - Sessions use an HMAC-signed cookie (`srr_session` = `<user id>.<expiry>.<sig>`, HttpOnly, SameSite=Strict, Secure behind the tunnel). The signature covers the user's password hash, and the user is looked up on every request: a password change logs that user out elsewhere, and a role change or deletion applies at once. Sessions last 7 days and are renewed on every page load (`GET /api/me`). The signing key is kept in `session.key` in the install folder, so sessions survive restarts and updates; delete it to log everyone out.

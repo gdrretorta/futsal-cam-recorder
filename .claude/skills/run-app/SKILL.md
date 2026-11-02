@@ -1,6 +1,6 @@
 ---
 name: run-app
-description: Run Simple RTSP Recorder locally against a fake RTSP camera, drive it through the API and take UI screenshots. Use to verify a change end-to-end (recording, reconnect, resume, UI) before pushing.
+description: Run Futsal Cam Recorder locally against a fake RTSP camera, drive it through the API and take UI screenshots. Use to verify a change end-to-end (recording, reconnect, resume, UI) before pushing.
 ---
 
 # Run the app locally

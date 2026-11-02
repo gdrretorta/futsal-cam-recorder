@@ -1,11 +1,11 @@
-# Simple RTSP Recorder - installer / upgrader
+# Futsal Cam Recorder - installer / upgrader
 #
 # Run in PowerShell as Administrator:
-#   irm https://raw.githubusercontent.com/joaoopereira/simple-rtsp-recorder/development/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/gdrretorta/futsal-cam-recorder/development/install.ps1 | iex
 #
 # - Upgrading (including from 1.x): installs into the folder of the existing
 #   service, keeping settings (prod.env is converted to config.json) and recordings.
-# - New install: C:\SimpleRTSPRecorder, or the folder in $env:SRR_INSTALL_DIR.
+# - New install: C:\FutsalCamRecorder, or the folder in $env:SRR_INSTALL_DIR.
 #
 # After this, the app updates itself; this script is only needed once per PC.
 
@@ -13,10 +13,13 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$Repo = 'joaoopereira/simple-rtsp-recorder'
+$Repo = 'gdrretorta/futsal-cam-recorder'
+# The service keeps its 1.x name, so upgrades find and replace it.
 $ServiceName = 'SimpleRTSPRecorder'
-$ExeName = 'simple-rtsp-recorder.exe'
-$ZipName = 'simple-rtsp-recorder-win-x64.zip'
+$ExeName = 'futsal-cam-recorder.exe'
+$ZipName = 'futsal-cam-recorder-win-x64.zip'
+# Name of the exe until 2.8 (the app was called Simple RTSP Recorder).
+$LegacyExeName = 'simple-rtsp-recorder.exe'
 
 function Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 
@@ -42,7 +45,7 @@ if ($existing) {
 } elseif ($env:SRR_INSTALL_DIR) {
     $InstallDir = $env:SRR_INSTALL_DIR
 } else {
-    $InstallDir = 'C:\SimpleRTSPRecorder'
+    $InstallDir = 'C:\FutsalCamRecorder'
 }
 Step "Pasta de instalação: $InstallDir"
 
@@ -66,7 +69,7 @@ try {
         (Get-Service -Name $ServiceName).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
     }
     # The 1.x wrapper may leave the old process behind for a moment.
-    Get-Process -Name 'simple-rtsp-recorder' -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process -Name 'futsal-cam-recorder', 'simple-rtsp-recorder' -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Seconds 2
 
     Step 'A copiar ficheiros...'
@@ -102,6 +105,12 @@ try {
     Step 'A instalar o serviço...'
     & $exe install
     if ($LASTEXITCODE -ne 0) { throw 'Falha ao instalar o serviço (ver mensagem acima).' }
+
+    # The service now runs the exe with the new name: remove the old one.
+    $legacyExe = Join-Path $InstallDir $LegacyExeName
+    if (Test-Path $legacyExe) {
+        Remove-Item $legacyExe, "$legacyExe.old", "$legacyExe.new" -Force -ErrorAction SilentlyContinue
+    }
 } finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }

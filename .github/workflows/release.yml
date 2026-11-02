@@ -87,7 +87,7 @@ jobs:
           mkdir -p dist/pkg
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
             -ldflags "-s -w -X main.version=${VERSION}" \
-            -o dist/simple-rtsp-recorder.exe .
+            -o dist/futsal-cam-recorder.exe .
 
       - name: Bundle ffmpeg
         env:
@@ -96,9 +96,12 @@ jobs:
 
       - name: Package
         run: |
-          cp dist/simple-rtsp-recorder.exe LICENSE install.ps1 dist/pkg/
-          (cd dist/pkg && zip -q -r ../simple-rtsp-recorder-win-x64.zip .)
-          (cd dist && sha256sum simple-rtsp-recorder.exe simple-rtsp-recorder-win-x64.zip > checksums.txt)
+          cp dist/futsal-cam-recorder.exe LICENSE install.ps1 dist/pkg/
+          (cd dist/pkg && zip -q -r ../futsal-cam-recorder-win-x64.zip .)
+          # PCs on 2.8.x or older look for the exe under its old name: keep
+          # publishing a copy so they can update. Never remove it.
+          cp dist/futsal-cam-recorder.exe dist/simple-rtsp-recorder.exe
+          (cd dist && sha256sum futsal-cam-recorder.exe simple-rtsp-recorder.exe futsal-cam-recorder-win-x64.zip > checksums.txt)
           cat dist/checksums.txt
 
       - name: Publish release
@@ -108,6 +111,7 @@ jobs:
           target_commitish: ${{ steps.changelog.outputs.sha }}
           body_path: ${{ runner.temp }}/release-notes.md
           files: |
+            dist/futsal-cam-recorder.exe
             dist/simple-rtsp-recorder.exe
-            dist/simple-rtsp-recorder-win-x64.zip
+            dist/futsal-cam-recorder-win-x64.zip
             dist/checksums.txt

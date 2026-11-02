@@ -1,4 +1,4 @@
-module github.com/joaoopereira/simple-rtsp-recorder
+module github.com/gdrretorta/futsal-cam-recorder
 
 go 1.26.0
 

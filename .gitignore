@@ -1,7 +1,7 @@
 # Build output
 dist/
-/simple-rtsp-recorder
-/simple-rtsp-recorder.exe
+/futsal-cam-recorder
+/futsal-cam-recorder.exe
 *.exe
 
 # Runtime files (when running with -dir . during development)

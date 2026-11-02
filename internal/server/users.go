@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/config"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/config"
 )
 
 // errPermission is a refusal by the user-management rules (403).

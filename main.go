@@ -1,15 +1,15 @@
-// Simple RTSP Recorder: records an RTSP camera to MP4 files, controlled from
+// Futsal Cam Recorder: records an RTSP camera to MP4 files, controlled from
 // a web page. Runs as a Windows service and updates itself from GitHub.
 //
-//	simple-rtsp-recorder.exe            run (as service when started by Windows)
-//	simple-rtsp-recorder.exe install    install/replace the Windows service and start it
-//	simple-rtsp-recorder.exe uninstall  stop and remove the Windows service
-//	simple-rtsp-recorder.exe version    print the version
-//	simple-rtsp-recorder.exe add-user <email> <role>   create a user, or set its role and
+//	futsal-cam-recorder.exe            run (as service when started by Windows)
+//	futsal-cam-recorder.exe install    install/replace the Windows service and start it
+//	futsal-cam-recorder.exe uninstall  stop and remove the Windows service
+//	futsal-cam-recorder.exe version    print the version
+//	futsal-cam-recorder.exe add-user <email> <role>   create a user, or set its role and
 //	                                                   password; password read from stdin;
 //	                                                   role is admin, userManager or user
-//	simple-rtsp-recorder.exe set-admin-password   set the first admin's password (stdin)
-//	simple-rtsp-recorder.exe has-admin-password   exit code 0 if an admin exists, 1 if not
+//	futsal-cam-recorder.exe set-admin-password   set the first admin's password (stdin)
+//	futsal-cam-recorder.exe has-admin-password   exit code 0 if an admin exists, 1 if not
 //
 // Flags: -dir <path> uses another base directory (config, logs) — handy for
 // development, where the binary lives in a temp folder.
@@ -33,15 +33,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/config"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/logging"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/notify"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/recorder"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/server"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/service"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/tunnel"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/updater"
-	"github.com/joaoopereira/simple-rtsp-recorder/web"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/config"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/logging"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/notify"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/recorder"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/server"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/service"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/tunnel"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/updater"
+	"github.com/gdrretorta/futsal-cam-recorder/web"
 )
 
 // version is set at build time: -ldflags "-X main.version=v2.0.0".
@@ -49,9 +49,9 @@ var version = "dev"
 
 const (
 	serviceName = "SimpleRTSPRecorder" // same name as 1.x so upgrades replace it
-	displayName = "Simple RTSP Recorder"
+	displayName = "Futsal Cam Recorder"
 	description = "Grava o stream RTSP da câmara, com interface web."
-	repo        = "joaoopereira/simple-rtsp-recorder"
+	repo        = "gdrretorta/futsal-cam-recorder"
 )
 
 func main() {
@@ -248,7 +248,7 @@ func readPassword(prompt string) (string, error) {
 
 func addUser(dir, email, role string) error {
 	if email == "" || role == "" {
-		return errors.New("uso: simple-rtsp-recorder.exe add-user <email> <admin|userManager|user> (palavra-passe no stdin)")
+		return errors.New("uso: futsal-cam-recorder.exe add-user <email> <admin|userManager|user> (palavra-passe no stdin)")
 	}
 	r, err := config.ParseRole(role)
 	if err != nil {

@@ -46,13 +46,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/config"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/logging"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/notify"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/recorder"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/sysinfo"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/tunnel"
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/updater"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/config"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/logging"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/notify"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/recorder"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/sysinfo"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/tunnel"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/updater"
 )
 
 const snapshotTTL = 5 * time.Second

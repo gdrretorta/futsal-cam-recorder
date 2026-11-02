@@ -305,7 +305,7 @@ func (s *Store) SetAdminPassword(password string) error {
 	users := s.Get().Users
 	i := findUser(users, func(u User) bool { return u.Role == RoleAdmin })
 	if i < 0 {
-		return errors.New("não existe nenhum administrador; crie um com: simple-rtsp-recorder.exe add-user <email> admin")
+		return errors.New("não existe nenhum administrador; crie um com: futsal-cam-recorder.exe add-user <email> admin")
 	}
 	_, err := s.UpdateUser(users[i].ID, UserChanges{Password: &password}, nil)
 	return err

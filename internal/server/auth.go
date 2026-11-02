@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/joaoopereira/simple-rtsp-recorder/internal/config"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/config"
 )
 
 const (
@@ -324,7 +324,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.Store.HasUsers() {
-		writeError(w, http.StatusForbidden, errors.New("ainda não existe nenhum utilizador; crie um administrador no PC com: simple-rtsp-recorder.exe add-user <email> admin"))
+		writeError(w, http.StatusForbidden, errors.New("ainda não existe nenhum utilizador; crie um administrador no PC com: futsal-cam-recorder.exe add-user <email> admin"))
 		return
 	}
 	u, err := s.Store.Authenticate(body.Email, body.Password)

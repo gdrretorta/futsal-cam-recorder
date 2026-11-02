@@ -405,7 +405,7 @@ function confirmDelete(rec) {
 const form = $("settingsForm");
 const fields = form.elements;
 
-const NO_USERS = "Ainda não existe nenhum utilizador. Crie um administrador no PC: corra o instalador novamente ou execute \"simple-rtsp-recorder.exe add-user <email> admin\".";
+const NO_USERS = "Ainda não existe nenhum utilizador. Crie um administrador no PC: corra o instalador novamente ou execute \"futsal-cam-recorder.exe add-user <email> admin\".";
 
 // The settings are admin-only. While there are no users, nobody can open
 // them: explain how to create the first admin.

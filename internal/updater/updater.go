@@ -27,7 +27,7 @@ import (
 
 const (
 	// AssetName is the release asset holding the bare executable.
-	AssetName     = "simple-rtsp-recorder.exe"
+	AssetName     = "futsal-cam-recorder.exe"
 	checksumsName = "checksums.txt"
 	checkInterval = time.Hour
 	applyInterval = 30 * time.Second
