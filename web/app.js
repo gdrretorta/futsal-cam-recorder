@@ -564,7 +564,9 @@ async function loadMe() {
   try {
     me = await api("GET", "/api/me");
   } catch {
-    return; // offline: keep the current state
+    // Offline: keep the current state, or keep trying if there is none yet.
+    if (!me) setTimeout(loadMe, 3000);
+    return;
   }
   applyAccess();
 }
@@ -577,6 +579,7 @@ let wantLogin = false; // on the PC itself: the user asked to log in
 function applyAccess() {
   const loggedOut = (me.authRequired && !me.user) || wantLogin;
   const mustChange = !!(me.user && me.user.mustChangePassword);
+  $("bootView").hidden = true;
   const wasMustChange = !$("passwordView").hidden;
   const wasLoggedOut = !$("loginView").hidden || wasMustChange;
   $("loginView").hidden = !loggedOut;

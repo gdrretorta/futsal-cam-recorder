@@ -14,7 +14,7 @@
       <img src="icon.svg" alt="" width="28" height="28">
       <h1 id="title">Simple RTSP Recorder</h1>
     </div>
-    <div id="topbarActions" class="topbar-actions">
+    <div id="topbarActions" class="topbar-actions" hidden>
       <span id="pill" class="pill">—</span>
       <button id="usersBtn" class="icon-btn" title="Utilizadores" aria-label="Utilizadores" hidden>
         <svg viewBox="0 0 24 24"><path d="M16 20v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 18.5V20"/><circle cx="10" cy="8" r="3.5"/><path d="M20 20v-1.5a3.5 3.5 0 0 0-2.5-3.35M15.5 4.65a3.5 3.5 0 0 1 0 6.7"/></svg>
@@ -27,6 +27,9 @@
       </button>
     </div>
   </header>
+
+  <!-- Until /api/me answers, show neither the recorder nor the login. -->
+  <main id="bootView" class="login-view"><p class="muted">A carregar…</p></main>
 
   <main id="loginView" class="login-view" hidden>
     <form id="loginForm" class="card login-card">
@@ -52,7 +55,7 @@
     </form>
   </main>
 
-  <main id="app" class="layout">
+  <main id="app" class="layout" hidden>
     <section class="card camera">
       <div class="preview">
         <img id="preview" alt="Imagem da câmara" hidden>
@@ -88,7 +91,7 @@
     </section>
   </main>
 
-  <footer class="footer">
+  <footer class="footer" hidden>
     <div id="disk" class="disk" hidden>
       <div class="disk-bar"><span id="diskFill"></span></div>
       <span id="diskText" class="muted"></span>
