@@ -151,8 +151,12 @@ h3 { font-size: 1rem; }
 .tag { font-size: .7rem; font-weight: 600; color: var(--warn); margin-left: 6px; }
 .rec-more { display: block; width: 100%; margin-top: 8px; }
 .rec-more[hidden] { display: none; }
-/* Phones: date and buttons only. */
-@media (max-width: 600px) { .rec-meta { display: none; } }
+.rec-time-short { display: none; }
+/* Phones: the date on the first line, time and size below. */
+@media (max-width: 600px) {
+  .rec-time, .rec-file { display: none; }
+  .rec-time-short { display: inline; }
+}
 .empty { text-align: center; padding: 24px 0; }
 
 /* Login */
@@ -231,6 +235,14 @@ h3 { font-size: 1rem; }
 .disk-bar { width: 120px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
 .disk-bar span { display: block; height: 100%; background: var(--accent); }
 .disk-bar span.low { background: var(--danger); }
+/* Phones: the disk bar across the width, then version left and links right. */
+@media (max-width: 600px) {
+  .footer { flex-direction: column; align-items: stretch; gap: 14px; padding: 8px 16px 28px; }
+  .disk { width: 100%; }
+  .disk-bar { flex: 1; width: auto; }
+  .footer-meta { justify-content: space-between; }
+  .footer-meta #version { margin-right: auto; }
+}
 
 /* Dialogs */
 .dlg {

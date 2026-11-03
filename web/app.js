@@ -81,6 +81,8 @@ function fmtBytes(n) {
 }
 
 const dateFmt = new Intl.DateTimeFormat("pt-PT", { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+const dayFmt = new Intl.DateTimeFormat("pt-PT", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+const timeFmt = new Intl.DateTimeFormat("pt-PT", { hour: "2-digit", minute: "2-digit" });
 
 // Recordings are named 2026-10-29_153000.mp4; fall back to the file date.
 function recordingDate(rec) {
@@ -320,7 +322,11 @@ function renderRecording(rec) {
   info.className = "rec-info";
   const name = document.createElement("div");
   name.className = "rec-name";
-  name.textContent = dateFmt.format(recordingDate(rec));
+  // On a phone the time moves to the second line, so the date fits (style.css).
+  const when = recordingDate(rec);
+  const time = timeFmt.format(when);
+  const span = (cls, text) => Object.assign(document.createElement("span"), { className: cls, textContent: text });
+  name.append(dayFmt.format(when), span("rec-time", `, ${time}`));
   if (rec.processing) {
     const tag = document.createElement("span");
     tag.className = "tag";
@@ -329,7 +335,7 @@ function renderRecording(rec) {
   }
   const meta = document.createElement("div");
   meta.className = "muted rec-meta";
-  meta.textContent = `${rec.name} · ${fmtBytes(rec.size)}`;
+  meta.append(span("rec-time-short", `${time} · `), span("rec-file", `${rec.name} · `), fmtBytes(rec.size));
   info.append(name, meta);
 
   const actions = document.createElement("div");
