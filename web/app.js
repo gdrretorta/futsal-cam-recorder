@@ -198,7 +198,7 @@ function renderStatus() {
   renderTimer();
 
   $("version").textContent = status.version;
-  $("updateText").textContent = updateText(status.update);
+  renderUpdate();
 
   if (status.disk) {
     const used = 1 - status.disk.free / status.disk.total;
@@ -220,16 +220,64 @@ function renderTimer() {
   $("timer").textContent = timerStart ? fmtDuration(Date.now() - timerStart) : "00:00:00";
 }
 
-function updateText(u) {
+// ---------- Updates (footer notice and the "Sistema" settings) ----------
+
+// What needs an admin's attention, shown in the footer and on the settings'
+// "Sistema" link. "" when nothing does.
+function updateAttention(u) {
   switch (u.state) {
-    case "checking": return "A verificar atualizações…";
-    case "downloading": return `A descarregar ${u.latest}…`;
-    case "waiting": return `${u.latest} pronta — instala quando não houver gravações`;
-    case "applying": return `A instalar ${u.latest}…`;
-    case "error": return u.error;
-    case "disabled": return "Atualizações automáticas desligadas";
-    default: return u.lastCheck && u.latest ? "Atualizado" : "";
+    case "downloading": return `A descarregar a versão ${u.latest}…`;
+    case "waiting": return `Versão ${u.latest} pronta a instalar`;
+    case "error": return "A atualização falhou";
+    default: return "";
   }
+}
+
+// The recorder's update state in the settings: [text, class].
+function updateState(u) {
+  const checked = u.lastCheck ? ` · verificado ${ago(u.lastCheck)}` : "";
+  switch (u.state) {
+    case "checking": return ["A verificar atualizações…", "busy"];
+    case "downloading": return [`A descarregar a versão ${u.latest}…`, "busy"];
+    case "waiting": return [`Versão ${u.latest} descarregada: instala quando não houver gravações`, "warn"];
+    case "applying": return [`A instalar a versão ${u.latest}…`, "busy"];
+    case "error": return [u.error || "A atualização falhou", "bad"];
+    case "disabled": return ["Atualizações automáticas desligadas" + checked, ""];
+    default: return u.lastCheck ? ["Atualizado" + checked, "ok"] : ["Ainda não verificado", ""];
+  }
+}
+
+// "há 5 min", "há 2 h", "em 31/10".
+function ago(iso) {
+  const ms = Date.now() - new Date(iso);
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return "agora mesmo";
+  if (min < 60) return `há ${min} min`;
+  if (min < 24 * 60) return `há ${Math.floor(min / 60)} h`;
+  return "em " + new Date(iso).toLocaleDateString("pt-PT", { day: "numeric", month: "numeric" });
+}
+
+const RELEASES = "https://github.com/gdrretorta/futsal-cam-recorder/releases";
+const releaseUrl = (v) => (/^\d+\.\d+\.\d+$/.test(v || "") ? `${RELEASES}/tag/v${v}` : RELEASES);
+
+function setState(el, [text, kind]) {
+  el.textContent = text;
+  el.className = "sys-state" + (kind ? " " + kind : "");
+  el.hidden = !text;
+}
+
+function renderUpdate() {
+  if (!status) return;
+  const u = status.update;
+  const attn = role() === "admin" ? updateAttention(u) : "";
+  $("updateBadge").hidden = !attn;
+  $("updateBadgeText").textContent = attn;
+  $("systemNav").querySelector(".attn-dot").hidden = !attn;
+  $("sysVersion").textContent = `versão ${status.version}`;
+  setState($("sysState"), updateState(u));
+  const notesFor = u.latest && u.latest !== status.version && u.state !== "error" ? u.latest : status.version;
+  $("sysNotes").href = releaseUrl(notesFor);
+  $("updateBtn").disabled = UPDATE_BUSY.includes(u.state);
 }
 
 $("recordBtn").addEventListener("click", async () => {
@@ -628,7 +676,7 @@ async function openSettings() {
   fields.notifyKey.dataset.touched = "";
   $("notifyTestResult").textContent = "";
   fields.tunnelAuto.checked = s.tunnel.autoUpdate;
-  $("tunnelInfo").textContent = "";
+  $("tunnelVersion").textContent = "";
   $("tunnelState").hidden = true;
   $("settingsError").hidden = true;
   $("testResult").textContent = "";
@@ -639,7 +687,10 @@ async function openSettings() {
   }
   showSettings(true);
   window.scrollTo(0, 0);
+  renderUpdate();
   loadTunnel();
+  loadLogs();
+  return true;
 }
 
 fields.password.addEventListener("input", () => (fields.password.dataset.touched = "1"));
@@ -698,18 +749,15 @@ async function loadTunnel() {
     return;
   }
   const busy = t.state in TUNNEL_STATES;
-  if (t.state === "unsupported") {
-    $("tunnelInfo").textContent = "Só disponível no PC Windows onde corre o cloudflared.";
-  } else {
-    const newer = t.latest && t.installed && t.latest !== t.installed ? ` · disponível: ${t.latest}` : "";
-    $("tunnelInfo").textContent = t.installed
-      ? `cloudflared instalado: ${t.installed}${newer}`
-      : "A procurar o cloudflared…";
-  }
-  const text = busy ? TUNNEL_STATES[t.state] : (t.message ? "Última atualização: " + t.message : "");
-  $("tunnelState").textContent = text;
-  $("tunnelState").hidden = !text;
-  $("tunnelState").classList.toggle("state-error", !busy && !!t.failed);
+  $("tunnelVersion").textContent = t.installed ? `versão ${t.installed}` : "";
+  let st;
+  if (t.state === "unsupported") st = ["Só disponível no PC Windows onde corre o cloudflared.", ""];
+  else if (busy) st = [TUNNEL_STATES[t.state], "busy"];
+  else if (!t.installed) st = ["A procurar o cloudflared…", ""];
+  else if (t.failed) st = ["A última atualização falhou: " + t.message, "bad"];
+  else if (t.latest && t.latest !== t.installed) st = [`Versão ${t.latest} disponível`, "warn"];
+  else st = ["Atualizado" + (t.lastCheck ? ` · verificado ${ago(t.lastCheck)}` : ""), "ok"];
+  setState($("tunnelState"), st);
   $("tunnelUpdateBtn").disabled = busy || t.state === "unsupported";
   loadTunnel.t = setTimeout(loadTunnel, busy || !t.installed ? 3000 : 30000);
 }
@@ -814,8 +862,7 @@ function applyAccess() {
   $("accountBtn").hidden = !me.user;
   $("accountBtn").title = me.local ? "Iniciar sessão" : "A minha conta";
   $("accountBtn").setAttribute("aria-label", $("accountBtn").title);
-  $("logsBtn").hidden = role() !== "admin";
-  $("updateBtn").hidden = role() !== "admin";
+  renderUpdate();
   if (wasLoggedOut) refreshStatus().then(refreshSnapshot);
 }
 
@@ -1043,21 +1090,125 @@ $("testBtn").addEventListener("click", async () => {
 
 // ---------- Logs & updates (admin only) ----------
 
-$("logsBtn").addEventListener("click", async () => {
+// The log lines are slog's text format:
+// time=2026-11-03T22:40:02.123+00:00 level=INFO msg="…" key=value…
+const LOG_RE = /^time=(\S+) level=(\S+) msg=("(?:[^"\\]|\\.)*"|\S*) ?(.*)$/;
+const LOG_LEVELS = { DEBUG: "DEBUG", INFO: "INFO", WARN: "AVISO", ERROR: "ERRO" };
+let logLines = [];
+let logLevel = "";
+
+function parseLog(line) {
+  const m = LOG_RE.exec(line);
+  if (!m) return { line, time: "", level: "", msg: line, attrs: "" };
+  let msg = m[3];
+  if (msg.startsWith('"')) {
+    try { msg = JSON.parse(msg); } catch { /* keep it quoted */ }
+  }
+  return { line, time: m[1], level: m[2], msg, attrs: m[4] };
+}
+
+// HH:MM:SS today, else also the day.
+function logTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  const t = d.toLocaleTimeString("pt-PT", { hour12: false });
+  return d.toDateString() === new Date().toDateString()
+    ? t : d.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit" }) + " " + t;
+}
+
+async function loadLogs() {
   try {
-    const lines = await api("GET", "/api/logs");
-    $("logs").textContent = (lines || []).join("\n") || "(vazio)";
-    $("logsDlg").showModal();
-    $("logs").scrollTop = $("logs").scrollHeight;
+    logLines = ((await api("GET", "/api/logs")) || []).map(parseLog);
   } catch (e) {
     toast(e.message, true);
+    return;
   }
+  renderLogs(true);
+}
+
+function shownLogs() {
+  const q = $("logsSearch").value.trim().toLowerCase();
+  return logLines.filter((l) =>
+    (!logLevel || l.level === logLevel || (logLevel === "WARN" && l.level === "ERROR")) &&
+    (!q || l.line.toLowerCase().includes(q)));
+}
+
+function renderLogs(toEnd) {
+  const box = $("logs");
+  const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  const rows = shownLogs().map((l) => {
+    const row = document.createElement("div");
+    row.className = "log-row" + (l.level === "WARN" ? " warn" : l.level === "ERROR" ? " bad" : "");
+    const time = document.createElement("span");
+    time.className = "log-time";
+    time.textContent = l.time ? logTime(l.time) : "";
+    const level = document.createElement("span");
+    level.className = "log-level";
+    level.textContent = LOG_LEVELS[l.level] || l.level;
+    const msg = document.createElement("span");
+    msg.className = "log-msg";
+    msg.textContent = l.msg + " ";
+    const attrs = document.createElement("span");
+    attrs.className = "muted";
+    attrs.textContent = l.attrs;
+    msg.append(attrs);
+    row.append(time, level, msg);
+    return row;
+  });
+  if (!rows.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted log-empty";
+    empty.textContent = logLines.length ? "Nenhuma linha corresponde ao filtro." : "(vazio)";
+    rows.push(empty);
+  }
+  box.replaceChildren(...rows);
+  const count = (lvl) => logLines.filter((l) => l.level === lvl).length;
+  const warns = count("WARN") + count("ERROR"), errors = count("ERROR");
+  document.querySelector('.seg [data-level="WARN"]').textContent = warns ? `Avisos (${warns})` : "Avisos";
+  document.querySelector('.seg [data-level="ERROR"]').textContent = errors ? `Erros (${errors})` : "Erros";
+  if (toEnd || atEnd) box.scrollTop = box.scrollHeight;
+}
+
+document.querySelectorAll(".seg [data-level]").forEach((b) => b.addEventListener("click", () => {
+  logLevel = b.dataset.level;
+  document.querySelectorAll(".seg [data-level]").forEach((o) => o.setAttribute("aria-pressed", String(o === b)));
+  renderLogs(true);
+}));
+$("logsSearch").addEventListener("input", () => renderLogs(true));
+// Enter in the search box must not submit (save) the settings form.
+$("logsSearch").addEventListener("keydown", (ev) => { if (ev.key === "Enter") ev.preventDefault(); });
+$("logsRefresh").addEventListener("click", loadLogs);
+$("logsCopy").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(shownLogs().map((l) => l.line).join("\n"));
+    toast("Registos copiados");
+  } catch {
+    toast("Não foi possível copiar", true);
+  }
+});
+$("logsDownload").addEventListener("click", () => {
+  const blob = new Blob([logLines.map((l) => l.line).join("\n") + "\n"], { type: "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `recorder-${new Date().toISOString().slice(0, 10)}.log`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+
+// The footer notice opens the settings at "Sistema".
+$("updateBadge").addEventListener("click", async (ev) => {
+  ev.preventDefault();
+  if (settingsOpen || await openSettings()) $("s-system").scrollIntoView({ behavior: "smooth" });
 });
 
 $("updateBtn").addEventListener("click", async () => {
   try {
-    await api("POST", "/api/update/check");
-    toast("A verificar atualizações…");
+    const u = await api("POST", "/api/update/check");
+    if (status) {
+      // The check starts a moment later: show it already.
+      status.update = UPDATE_BUSY.includes(u.state) ? u : { ...u, state: "checking" };
+      renderUpdate();
+    }
     setTimeout(refreshStatus, 1500);
   } catch (e) {
     toast(e.message, true);

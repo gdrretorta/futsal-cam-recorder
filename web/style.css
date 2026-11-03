@@ -254,8 +254,8 @@ h3 { font-size: 1rem; }
   .footer { flex-direction: column; align-items: stretch; gap: 14px; padding: 8px 16px 28px; }
   .disk { width: 100%; }
   .disk-bar { flex: 1; width: auto; }
-  .footer-meta { justify-content: space-between; }
-  .footer-meta #version { margin-right: auto; }
+  .footer-meta { flex-direction: column; align-items: stretch; text-align: center; gap: 10px; }
+  .attn { justify-content: center; min-height: 44px; border-radius: 12px; }
 }
 
 /* Dialogs */
@@ -294,10 +294,78 @@ input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 50%, transpare
 @media (max-width: 480px) { .grid2, .grid2:has([name=user]) { grid-template-columns: 1fr; } }
 .test-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .test-img { width: 100%; border-radius: 8px; }
-.logs {
-  margin: 0; max-height: 65vh; overflow: auto; font: .78rem/1.45 ui-monospace, Consolas, monospace;
-  background: var(--input); border: 1px solid var(--border); border-radius: 8px; padding: 10px; white-space: pre-wrap; word-break: break-all;
+/* Settings › Sistema: updates and logs, full width under the grid. */
+.system { scroll-margin-top: 80px; }
+.system .settings-section { break-inside: auto; }
+.sys-row {
+  display: grid; grid-template-columns: 200px minmax(0, 1fr) auto; gap: 8px 16px; align-items: center;
+  padding: 12px 0; border-top: 1px solid var(--border);
 }
+.sys-row:first-of-type { border-top: 0; padding-top: 0; }
+.sys-row:last-child { padding-bottom: 0; }
+.sys-name { display: flex; flex-direction: column; gap: 2px; }
+.sys-name .muted { font-size: .85rem; }
+.sys-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.sys-actions { display: flex; align-items: center; gap: 12px; justify-content: flex-end; }
+.sys-actions a { font-size: .875rem; white-space: nowrap; }
+.sys-state { display: flex; align-items: baseline; gap: 8px; font-size: .9rem; color: var(--muted); }
+.sys-state::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: currentColor; transform: translateY(-1px); }
+.sys-state.ok { color: var(--ok); }
+.sys-state.warn { color: var(--warn); }
+.sys-state.bad { color: var(--danger); }
+.sys-state.busy { color: var(--accent); }
+@media (max-width: 700px) {
+  .sys-row { grid-template-columns: 1fr; }
+  .sys-name { flex-direction: row; justify-content: space-between; align-items: baseline; }
+  .sys-actions { justify-content: stretch; }
+  .sys-actions > * { flex: 1; text-align: center; }
+  .sys-actions .btn { min-height: 44px; }
+}
+
+.logs-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.logs-head h3 { margin: 0; }
+.logs-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.logs-tools input { width: 180px; padding: 6px 10px; }
+.seg { display: flex; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.seg button { font: inherit; font-size: .85rem; border: 0; padding: 6px 12px; background: transparent; color: var(--muted); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: color-mix(in srgb, var(--muted) 20%, transparent); color: var(--text); }
+.icon-btn.boxed { border: 1px solid var(--border); width: 34px; height: 34px; }
+.icon-btn.boxed svg { width: 17px; height: 17px; }
+@media (max-width: 700px) {
+  .logs-tools { width: 100%; }
+  .logs-tools .seg { flex: 1 1 100%; order: 2; }
+  .logs-tools .seg button { flex: 1; min-height: 40px; }
+  .logs-tools input { flex: 1; width: auto; min-width: 0; }
+  .icon-btn.boxed { width: 44px; height: 40px; }
+}
+.logs {
+  height: min(60vh, 520px); overflow: auto; font: .78rem/1.45 ui-monospace, Consolas, monospace;
+  background: var(--input); border: 1px solid var(--border); border-radius: 8px;
+}
+.log-row { display: grid; grid-template-columns: auto 52px minmax(0, 1fr); gap: 12px; padding: 4px 10px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.log-row.warn { background: color-mix(in srgb, var(--warn) 9%, transparent); }
+.log-row.bad { background: color-mix(in srgb, var(--danger) 11%, transparent); }
+.log-time { color: var(--muted); white-space: nowrap; }
+.log-level { font-weight: 600; color: var(--accent); }
+.log-row.warn .log-level { color: var(--warn); }
+.log-row.bad .log-level { color: var(--danger); }
+.log-msg { overflow-wrap: anywhere; }
+.log-empty { padding: 10px; margin: 0; }
+.logs-foot { margin: 10px 0 0; }
+@media (max-width: 600px) {
+  .log-row { grid-template-columns: auto 1fr; gap: 2px 10px; padding: 6px 10px; }
+  .log-msg { grid-column: 1 / -1; }
+}
+
+/* Something needs an admin's attention: footer notice and the "Sistema" link. */
+.attn {
+  display: inline-flex; align-items: center; gap: 8px; font-size: .85rem; text-decoration: none;
+  color: var(--warn); background: color-mix(in srgb, var(--warn) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); border-radius: 999px; padding: 4px 12px;
+}
+.attn-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.settings-nav a .attn-dot { margin-left: 4px; vertical-align: 1px; }
 
 .toast {
   position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);

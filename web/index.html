@@ -118,7 +118,7 @@
         <a href="#s-recordings">Gravações</a>
         <a href="#s-general">Geral</a>
         <a href="#s-notify">Avisos por email</a>
-        <a href="#s-tunnel">Túnel Cloudflare</a>
+        <a href="#s-system" id="systemNav">Sistema <span class="attn-dot" hidden></span></a>
       </nav>
       <div class="settings-grid">
         <section id="s-camera" class="card settings-section">
@@ -152,7 +152,6 @@
           <fieldset>
             <label>Título<input name="title"></label>
             <label>Endereço público do site (links nos emails e confirmação do túnel)<input name="notifySite" type="url" placeholder="https://futsal.retorta.com"></label>
-            <label class="check"><input name="autoUpdate" type="checkbox"> Atualizar o gravador automaticamente (só quando não há gravações)</label>
           </fieldset>
         </section>
         <section id="s-notify" class="card settings-section">
@@ -170,17 +169,49 @@
             </div>
           </fieldset>
         </section>
-        <section id="s-tunnel" class="card settings-section">
-          <h3>Túnel Cloudflare</h3>
-          <fieldset>
-            <p id="tunnelInfo" class="muted hint"></p>
-            <p id="tunnelState" class="muted hint" hidden></p>
-            <label class="check"><input name="tunnelAuto" type="checkbox"> Atualizar o cloudflared automaticamente (às segundas-feiras às 4h, depois de terminarem as gravações)</label>
-            <div class="test-row">
-              <button type="button" id="tunnelUpdateBtn" class="btn">Atualizar agora</button>
-              <span class="muted">Espera pelo fim das gravações. O site fica indisponível uns segundos.</span>
+      </div>
+      <div id="s-system" class="system">
+        <section class="card settings-section">
+          <h3>Atualizações</h3>
+          <div class="sys-row">
+            <div class="sys-name"><strong>Gravador</strong><span id="sysVersion" class="muted"></span></div>
+            <div class="sys-body">
+              <span id="sysState" class="sys-state"></span>
+              <label class="check"><input name="autoUpdate" type="checkbox"> Atualizar automaticamente (só quando não há gravações)</label>
             </div>
-          </fieldset>
+            <div class="sys-actions">
+              <a id="sysNotes" href="https://github.com/gdrretorta/futsal-cam-recorder/releases" target="_blank" rel="noopener">O que mudou</a>
+              <button type="button" id="updateBtn" class="btn">Verificar agora</button>
+            </div>
+          </div>
+          <div class="sys-row">
+            <div class="sys-name"><strong>Túnel (cloudflared)</strong><span id="tunnelVersion" class="muted"></span></div>
+            <div class="sys-body">
+              <span id="tunnelState" class="sys-state"></span>
+              <label class="check"><input name="tunnelAuto" type="checkbox"> Atualizar automaticamente (às segundas-feiras às 4h, depois de terminarem as gravações)</label>
+            </div>
+            <div class="sys-actions">
+              <button type="button" id="tunnelUpdateBtn" class="btn" title="Espera pelo fim das gravações. O site fica indisponível uns segundos.">Atualizar agora</button>
+            </div>
+          </div>
+        </section>
+        <section class="card settings-section">
+          <div class="logs-head">
+            <h3>Registos</h3>
+            <div class="logs-tools">
+              <div class="seg" role="group" aria-label="Filtrar registos">
+                <button type="button" data-level="" aria-pressed="true">Tudo</button>
+                <button type="button" data-level="WARN" aria-pressed="false">Avisos</button>
+                <button type="button" data-level="ERROR" aria-pressed="false">Erros</button>
+              </div>
+              <input id="logsSearch" type="search" placeholder="Procurar…" aria-label="Procurar nos registos" autocomplete="off">
+              <button type="button" id="logsRefresh" class="icon-btn boxed" title="Atualizar" aria-label="Atualizar"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2 6M20 4v7h-7"/></svg></button>
+              <button type="button" id="logsCopy" class="icon-btn boxed" title="Copiar" aria-label="Copiar"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg></button>
+              <button type="button" id="logsDownload" class="icon-btn boxed" title="Descarregar" aria-label="Descarregar"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></button>
+            </div>
+          </div>
+          <div id="logs" class="logs" role="log" tabindex="0"></div>
+          <p class="muted hint logs-foot">Últimas 500 linhas, as mais recentes em baixo. O ficheiro completo está em logs/recorder.log, no PC.</p>
         </section>
       </div>
       <div class="settings-bar">
@@ -199,10 +230,8 @@
       <span id="diskText" class="muted"></span>
     </div>
     <div class="footer-meta">
+      <a id="updateBadge" class="attn" href="#definicoes" hidden><span class="attn-dot"></span><span id="updateBadgeText"></span></a>
       <span id="version" class="muted"></span>
-      <span id="updateText" class="muted"></span>
-      <button id="updateBtn" class="link-btn" hidden>Verificar atualizações</button>
-      <button id="logsBtn" class="link-btn" hidden>Logs</button>
     </div>
   </footer>
 
@@ -263,11 +292,6 @@
         <button type="submit" class="btn primary">Guardar</button>
       </div>
     </form>
-  </dialog>
-
-  <dialog id="logsDlg" class="dlg wide">
-    <div class="dlg-head"><h3>Logs</h3><button class="icon-btn" data-close aria-label="Fechar">✕</button></div>
-    <pre id="logs" class="logs"></pre>
   </dialog>
 
   <div id="updateOverlay" class="update-overlay" role="alertdialog" aria-modal="true" aria-labelledby="updateOverlayTitle" aria-busy="true" hidden>
