@@ -12,7 +12,7 @@ import (
 // A file that references other assets (the manifest references the icons)
 // is listed after them: it is rewritten first, then hashed.
 var assets = []string{
-	"style.css", "app.js", "icon.svg",
+	"style.css", "app.js", "icon.svg", "hls.light.min.js",
 	"icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png",
 	"manifest.webmanifest",
 }

@@ -100,7 +100,15 @@ h3 { font-size: 1rem; }
   position: relative; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden;
   background: #000; display: grid; place-items: center;
 }
-.preview img { width: 100%; height: 100%; object-fit: contain; }
+.preview img, .preview video { width: 100%; height: 100%; object-fit: contain; }
+.live-btn {
+  position: absolute; top: 10px; right: 10px;
+  background: rgb(0 0 0 / .6); color: #fff; border: 1px solid rgb(255 255 255 / .35);
+  font: inherit; font-weight: 600; font-size: .8rem;
+  padding: 5px 10px; border-radius: 999px; cursor: pointer;
+}
+.live-btn:hover { background: rgb(0 0 0 / .8); }
+.live-btn.on { background: var(--rec); border-color: transparent; }
 .preview-empty { color: #a1a1aa; font-size: .9rem; }
 .rec-badge {
   position: absolute; top: 10px; left: 10px;

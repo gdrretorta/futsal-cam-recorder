@@ -102,6 +102,14 @@ type Recorder struct {
 	// doesn't open a second stream to the camera while recording.
 	liveFrame   []byte
 	liveFrameAt time.Time
+
+	// Live view (live.go). liveMu is never taken while holding mu.
+	liveMu     sync.Mutex
+	liveP      *liveProc
+	liveErr    error
+	liveFailAt time.Time
+	liveIdle   time.Duration
+	index      liveIndex
 }
 
 // New creates a recorder. stateFile remembers whether a recording was in
@@ -116,6 +124,7 @@ func New(ffmpeg string, source Source, stateFile string, log *slog.Logger) *Reco
 		connectTimeout: 30 * time.Second,
 		stallTimeout:   30 * time.Second,
 		backoff:        []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second},
+		liveIdle:       30 * time.Second,
 		bgCtx:          ctx,
 		bgCancel:       cancel,
 		state:          StateIdle,
@@ -204,6 +213,7 @@ func (r *Recorder) Stop() error {
 // Shutdown stops any session without forgetting it (so it resumes on next
 // start), waiting at most until ctx is done.
 func (r *Recorder) Shutdown(ctx context.Context) {
+	r.stopLive()
 	r.mu.Lock()
 	done := r.done
 	if r.state != StateIdle && r.state != StateStopping {
@@ -335,6 +345,9 @@ func (r *Recorder) CleanupTemp() {
 // session runs until stopped, reconnecting whenever ffmpeg exits.
 func (r *Recorder) session(stop, done chan struct{}, resume bool) {
 	defer close(done)
+	// The live view's own ffmpeg must have closed its connection before the
+	// recording opens one: the camera never sends two streams at once.
+	r.stopLive()
 	attempt := 0
 loop:
 	for {
@@ -547,7 +560,16 @@ func (r *Recorder) finalize(path string) error {
 		os.Remove(tmp)
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	// Retried: on Windows, a reader that has the file open for an instant
+	// (the live view) can make the rename fail.
+	var err error
+	for try := 0; try < 5; try++ {
+		if err = os.Rename(tmp, path); err == nil {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if err != nil {
 		os.Remove(tmp)
 		return err
 	}

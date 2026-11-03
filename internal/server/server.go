@@ -16,6 +16,10 @@
 //	DELETE /api/recordings/{name}    delete a recording                       [user]
 //	GET    /recordings/{name}        play (range requests) or ?download=1     public
 //	GET    /api/snapshot             JPEG frame from the camera (cached)      [user]
+//	GET    /api/live?viewer=<id>     live view, HLS playlist; at most         [user]
+//	                                 recorder.LiveMaxViewers pages at once
+//	GET    /api/live/init/{gen}      live view, MP4 init section              [user]
+//	GET    /api/live/seg/{seq}       live view, MP4 segment                   [user]
 //	GET    /api/me                   {authRequired, user}; renews the session
 //	POST   /api/login                {email, password} → session cookie
 //	POST   /api/logout               end the session
@@ -97,6 +101,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/recordings/{name}", user(s.remove))
 	mux.HandleFunc("GET /recordings/{name}", s.serveRecording)
 	mux.HandleFunc("GET /api/snapshot", user(s.snapshot))
+	mux.HandleFunc("GET /api/live", user(s.livePlaylist))
+	mux.HandleFunc("GET /api/live/init/{gen}", user(s.liveInit))
+	mux.HandleFunc("GET /api/live/seg/{seq}", user(s.liveSegment))
 	mux.HandleFunc("GET /api/me", s.me)
 	mux.HandleFunc("POST /api/login", s.login)
 	mux.HandleFunc("POST /api/logout", s.logout)

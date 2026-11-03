@@ -16,7 +16,7 @@ can't easily get to the PC, so **auto-update is critical**: never break it.
 ```
 main.go                     commands (run/install/uninstall/version), wiring, restart after update
 internal/config             config.json load/save/validate; migration from 1.x prod.env
-internal/recorder           ffmpeg process: start/stop, reconnect, finalize (faststart remux), snapshot, list/prune
+internal/recorder           ffmpeg process: start/stop, reconnect, finalize (faststart remux), snapshot, list/prune; live.go + fmp4.go = live view (HLS)
 internal/server             HTTP API + static files (endpoint list in the package doc); auth.go = login, sessions, roles; users.go = user management
 internal/updater            GitHub release check → download + sha256 verify → swap exe when idle → restart
 internal/service            Windows service run/install/uninstall (stub on other OSes)
@@ -24,7 +24,7 @@ internal/tunnel             keeps cloudflared (the tunnel connector, a Windows s
 internal/notify             emails to the admins through the Resend API; Watcher = long-recording alert
 internal/logging            slog → rotating file logs/recorder.log + stdout + in-memory tail for /api/logs
 internal/sysinfo            free disk space (windows / unix)
-web/                        index.html, app.js, style.css, icons, manifest.webmanifest (installable app; embedded)
+web/                        index.html, app.js, style.css, icons, manifest.webmanifest (installable app; embedded), hls.light.min.js (vendored hls.js for the live view)
 scripts/fake-camera.sh      local RTSP test camera (mediamtx + ffmpeg test pattern)
 install.ps1                 one-time installer/upgrader (irm | iex)
 .github/workflows           ci.yml (fmt, vet linux+windows, test -race, build), release.yml
@@ -77,6 +77,7 @@ To run the app against the fake camera, see `.claude/skills/run-app/SKILL.md`.
 - **Setting**: add the field to `config.Config` with a default and validation, then to `settingsDTO` and its `toDTO`/`apply` in `server.go`, then to the settings form in `index.html` and to `openSettings`/`formSettings` in `app.js`. Settings are admin-only automatically. `apply` must keep fields that aren't in the DTO, such as `users`.
 - **Email alert**: build the message in `internal/notify` and send it with `notify.Send` to `notify.AdminEmails(cfg)`. Emails go out through the Resend HTTP API (`api.resend.com`), configured in the settings (`notify`). The long-recording alert (`notify.Watcher`, started in `main.go`) checks every minute and emails the admins when a recording reaches `notify.longRecordingHours`, then every hour; a failure is retried after 10 minutes. It counts from `Recorder.Status().StartedAt`, which survives a restart (the start time is kept in `recording.state`).
 - **cloudflared updates** (`internal/tunnel`): cloudflared doesn't update itself on Windows, and a broken tunnel cuts the owner off the PC, so the flow is defensive: check the public site (`notify.siteUrl` + `/api/status` must answer with this app's version, proving the path Cloudflare → tunnel → this PC) **before** touching anything; download `cloudflared-windows-amd64.exe` and verify the sha256 (GitHub asset `digest`, else the release notes; none = no install); check the new exe reports the expected version; wait for `TryLock` (no recording, blocks new ones); stop the service, keep `.old`, swap, start; check the public site for 2 minutes, else restore `.old`. Weekly (Monday 04:00–05:00, `tunnel.autoUpdate`) and from the "Atualizar agora" button. The service's command line holds the tunnel token: never log it (`ExeFromCommandLine` keeps only the path). Never weaken the pre-check, the checksum or the rollback.
+- **Live view** (`recorder/live.go`): HLS whose segments are the fragments of the fragmented MP4 that ffmpeg writes, served as they are. While recording it **only reads the recording's file** (`openShared`, which never blocks the writer, the finalize rename or a delete): never add an output, an argument or a second connection to the recording for it, the owner insisted the recordings must not get any hiccup. While idle, a separate ffmpeg writes to `<recordings>/live/` only while someone watches, and `session` stops it (`stopLive`) before the recording connects, so the camera never sends two streams. At most `LiveMaxViewers` pages watch at once.
 - **ffmpeg arguments**: `recordArgs` / `inputArgs` in `recorder.go`. Cover the change in `recorder_test.go`, which uses a real ffmpeg and a generated test file.
 
 ## Security model

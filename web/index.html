@@ -17,6 +17,8 @@
   <meta name="apple-mobile-web-app-title" content="Futsal Cam">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="stylesheet" href="style.css">
+  <!-- Loaded by app.js only when the browser needs it for the live view. -->
+  <meta name="hls-src" content="hls.light.min.js">
 </head>
 <body>
   <header class="topbar">
@@ -69,8 +71,10 @@
     <section class="card camera">
       <div class="preview">
         <img id="preview" alt="Imagem da câmara" hidden>
+        <video id="live" playsinline muted controls hidden></video>
         <div id="previewEmpty" class="preview-empty">Sem imagem da câmara</div>
         <span id="recBadge" class="rec-badge" hidden>● REC</span>
+        <button id="liveBtn" class="live-btn" hidden>▶ Ver em direto</button>
       </div>
 
       <div id="setupNotice" class="notice" hidden>

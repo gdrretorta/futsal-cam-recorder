@@ -177,6 +177,8 @@ function renderStatus() {
   $("stateError").textContent = r.error || "";
   $("stateError").hidden = !r.error;
   $("recBadge").hidden = !(r.state === "recording" || r.state === "reconnecting");
+  renderLive();
+  liveFollowState();
   $("setupNotice").hidden = status.configured;
   // Only an admin can open the settings (or anyone, while there are no users).
   const canSetUp = !me || !me.authRequired || role() === "admin";
@@ -248,7 +250,7 @@ $("recordBtn").addEventListener("click", async () => {
 // ---------- Camera preview ----------
 
 async function refreshSnapshot() {
-  if (document.hidden || !status || !status.configured) return;
+  if (document.hidden || !status || !status.configured || live) return;
   try {
     const blob = await api("GET", "/api/snapshot");
     const img = $("preview");
@@ -262,6 +264,134 @@ async function refreshSnapshot() {
     $("previewEmpty").hidden = false;
     $("previewEmpty").textContent = "Sem imagem: " + e.message;
   }
+}
+
+// ---------- Live view (HLS) ----------
+// The server reads the live view from the recording itself while recording
+// (no second stream from the camera), and runs its own ffmpeg only while
+// someone watches and nothing is recording. At most a few pages may watch at
+// once; the id below is how the server counts this page.
+
+const LIVE_VIEWER = Math.random().toString(36).slice(2) + Date.now().toString(36);
+const LIVE_URL = "/api/live?viewer=" + LIVE_VIEWER;
+const LIVE_RETRIES = 5;
+let live = null;        // {hls} or {native: true} while the player runs
+let liveWanted = false; // the user asked for the live view
+let liveTries = 0;
+let liveState = "";     // recorder state the player was started in
+
+function loadHls() {
+  if (window.Hls) return Promise.resolve(window.Hls);
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = document.querySelector('meta[name="hls-src"]').content;
+    s.onload = () => resolve(window.Hls);
+    s.onerror = () => reject(new Error("não foi possível carregar o leitor de vídeo"));
+    document.head.append(s);
+  });
+}
+
+function renderLive() {
+  const btn = $("liveBtn");
+  btn.hidden = !status || !status.configured;
+  btn.classList.toggle("on", liveWanted);
+  btn.textContent = liveWanted ? (live ? "● Ao vivo · Parar" : "A ligar…") : "▶ Ver em direto";
+}
+
+function teardownLive() {
+  const video = $("live");
+  if (live && live.hls) live.hls.destroy();
+  live = null;
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+  video.hidden = true;
+  if ($("preview").getAttribute("src")) $("preview").hidden = false;
+}
+
+async function startLive() {
+  liveWanted = true;
+  renderLive();
+  const video = $("live");
+  try {
+    // Asked once first, for a clear message (too many viewers, camera
+    // down) instead of a player error. It also waits for the first segment.
+    const res = await fetch(LIVE_URL);
+    if (!res.ok) {
+      let msg = res.statusText;
+      try { msg = (await res.json()).error || msg; } catch { /* not JSON */ }
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
+    }
+    if (!liveWanted || document.hidden) return;
+    teardownLive();
+    // iPhones (no MediaSource) play HLS natively; elsewhere hls.js does it,
+    // with a shorter delay than most native players.
+    if (!window.MediaSource && !window.ManagedMediaSource && video.canPlayType("application/vnd.apple.mpegurl")) {
+      live = { native: true };
+      video.src = LIVE_URL;
+    } else {
+      const Hls = await loadHls();
+      if (!liveWanted || document.hidden) return;
+      if (!Hls.isSupported()) throw new Error("este browser não consegue mostrar o direto");
+      const hls = new Hls({ liveSyncDurationCount: 2, liveMaxLatencyDurationCount: 6, maxLiveSyncPlaybackRate: 1.2, backBufferLength: 10 });
+      hls.on(Hls.Events.ERROR, (_, d) => {
+        if (d.fatal) liveFailed(new Error("o direto foi interrompido"));
+      });
+      live = { hls };
+      hls.loadSource(LIVE_URL);
+      hls.attachMedia(video);
+    }
+    liveState = status ? status.recorder.state : "";
+    video.hidden = false;
+    $("preview").hidden = true;
+    $("previewEmpty").hidden = true;
+    video.play().catch(() => { /* autoplay refused: the controls are there */ });
+    liveTries = 0;
+  } catch (e) {
+    liveFailed(e);
+  }
+  renderLive();
+}
+
+// A dropped live view is retried a few times (camera reconnecting, recording
+// just started); a refusal is not.
+function liveFailed(e) {
+  teardownLive();
+  const retry = liveWanted && ![409, 429].includes(e.status) && liveTries < LIVE_RETRIES;
+  if (retry) {
+    liveTries++;
+    clearTimeout(liveFailed.t);
+    liveFailed.t = setTimeout(() => { if (liveWanted && !live && !document.hidden) startLive(); }, 3000);
+  } else if (liveWanted) {
+    liveWanted = false;
+    toast("Direto: " + e.message, true);
+    refreshSnapshot();
+  }
+  renderLive();
+}
+
+function stopLive() {
+  liveWanted = false;
+  liveTries = 0;
+  clearTimeout(liveFailed.t);
+  teardownLive();
+  renderLive();
+  refreshSnapshot();
+}
+
+$("liveBtn").addEventListener("click", () => (liveWanted ? stopLive() : startLive()));
+$("live").addEventListener("error", () => { if (live && live.native) liveFailed(new Error("o direto foi interrompido")); });
+
+// Starting or stopping a recording switches the server to another file: the
+// player starts again on it instead of waiting for the old one.
+function liveFollowState() {
+  const s = status && status.recorder.state;
+  if (!live || !s || s === liveState || !["idle", "recording"].includes(s)) return;
+  liveState = s;
+  teardownLive();
+  startLive();
 }
 
 // ---------- Recordings ----------
@@ -680,6 +810,7 @@ function clearRecorder() {
   $("recList").replaceChildren();
   $("preview").hidden = true;
   $("preview").removeAttribute("src");
+  stopLive();
 }
 
 let loginPassword = ""; // kept only until the forced password change
@@ -939,6 +1070,9 @@ document.querySelectorAll("dialog [data-close]").forEach((b) =>
   b.addEventListener("click", () => b.closest("dialog").close()));
 
 document.addEventListener("visibilitychange", () => {
+  // A hidden page stops downloading the live view (and frees its place).
+  if (document.hidden && live) teardownLive();
+  if (!document.hidden && liveWanted && !live) startLive();
   if (!document.hidden) refreshStatus().then(refreshSnapshot);
 });
 // Mobile browsers restore a page from the back/forward cache without a

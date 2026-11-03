@@ -226,6 +226,22 @@ func addUser(t *testing.T, srv *httptest.Server, store *config.Store, email stri
 	return u, loginClient(t, srv, email, "password "+email)
 }
 
+// The live view's playing path is covered in recorder/live_test.go, with a
+// real ffmpeg. Here: the answers when there is nothing to play.
+func TestLiveEndpoints(t *testing.T) {
+	srv, _ := newTestServer(t)
+	c := adminClient(t, srv)
+	if resp, _ := doWith(t, c, "GET", srv.URL+"/api/live", ""); resp.StatusCode != 400 {
+		t.Errorf("playlist without a viewer id = %d, want 400", resp.StatusCode)
+	}
+	for _, path := range []string{"/api/live/init/7", "/api/live/seg/42", "/api/live/seg/x"} {
+		resp, body := doWith(t, c, "GET", srv.URL+path, "")
+		if resp.StatusCode != 404 || resp.Header.Get("Cache-Control") != "no-store" || !strings.Contains(body, "já não existe") {
+			t.Errorf("%s = %d %q %s, want an uncached 404", path, resp.StatusCode, resp.Header.Get("Cache-Control"), body)
+		}
+	}
+}
+
 func TestAccessByRole(t *testing.T) {
 	srv, store := newTestServer(t)
 	_, manager := addUser(t, srv, store, "manager@example.com", config.RoleUserManager)
@@ -243,6 +259,9 @@ func TestAccessByRole(t *testing.T) {
 		{"POST", "/api/recording/stop", [4]int{401, ok, ok, ok}},
 		{"DELETE", "/api/recordings/2026-01-01_000000.mp4", [4]int{401, ok, ok, ok}},
 		{"GET", "/api/snapshot", [4]int{401, ok, ok, ok}},
+		{"GET", "/api/live", [4]int{401, ok, ok, ok}},
+		{"GET", "/api/live/init/1", [4]int{401, ok, ok, ok}},
+		{"GET", "/api/live/seg/1", [4]int{401, ok, ok, ok}},
 		{"GET", "/api/users", [4]int{401, 403, ok, ok}},
 		{"POST", "/api/users", [4]int{401, 403, ok, ok}},
 		{"PUT", "/api/users/x", [4]int{401, 403, ok, ok}},
