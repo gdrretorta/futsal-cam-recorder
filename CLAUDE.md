@@ -32,7 +32,7 @@ install.ps1                 one-time installer/upgrader (irm | iex)
 
 Runtime files in the install folder: `futsal-cam-recorder.exe` (or `simple-rtsp-recorder.exe`, see below), `ffmpeg.exe`,
 `config.json`, `recording.state` (present while a recording should be running, so it
-resumes after a restart), `session.key` (signs login sessions), `logs/`, `recordings/`.
+resumes after a restart), `session.key` (signs login sessions), `logs/`, `recordings/` (with `protected.json`, the recordings marked "não apagar": retention skips them and delete answers 409).
 
 ## Contracts that must not change
 

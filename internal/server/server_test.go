@@ -187,6 +187,22 @@ func TestRecordingsEndpoints(t *testing.T) {
 		t.Fatal("file outside recordings dir was touched")
 	}
 
+	// A protected recording can't be deleted until the mark is removed.
+	if resp, body := do(t, "PUT", srv.URL+"/api/recordings/2026-10-29_150000.mp4/protected", `{"protected":true}`); resp.StatusCode != 200 || body != `{"protected":true}`+"\n" {
+		t.Fatalf("protect = %d %s", resp.StatusCode, body)
+	}
+	if _, body := do(t, "GET", srv.URL+"/api/recordings", ""); !strings.Contains(body, `"protected":true`) {
+		t.Fatalf("list after protect = %s", body)
+	}
+	if resp, body := do(t, "DELETE", srv.URL+"/api/recordings/2026-10-29_150000.mp4", ""); resp.StatusCode != 409 || !strings.Contains(body, "protegida") {
+		t.Fatalf("delete protected = %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := do(t, "PUT", srv.URL+"/api/recordings/2026-01-01_000000.mp4/protected", `{"protected":true}`); resp.StatusCode != 404 {
+		t.Fatalf("protect missing = %d, want 404", resp.StatusCode)
+	}
+	if resp, _ := do(t, "PUT", srv.URL+"/api/recordings/2026-10-29_150000.mp4/protected", `{"protected":false}`); resp.StatusCode != 200 {
+		t.Fatalf("unprotect = %d", resp.StatusCode)
+	}
 	if resp, _ := do(t, "DELETE", srv.URL+"/api/recordings/2026-10-29_150000.mp4", ""); resp.StatusCode != 204 {
 		t.Fatalf("delete = %d", resp.StatusCode)
 	}
@@ -258,6 +274,7 @@ func TestAccessByRole(t *testing.T) {
 		{"GET", "/api/recordings", [4]int{401, ok, ok, ok}},
 		{"POST", "/api/recording/stop", [4]int{401, ok, ok, ok}},
 		{"DELETE", "/api/recordings/2026-01-01_000000.mp4", [4]int{401, ok, ok, ok}},
+		{"PUT", "/api/recordings/2026-01-01_000000.mp4/protected", [4]int{401, ok, ok, ok}},
 		{"GET", "/api/snapshot", [4]int{401, ok, ok, ok}},
 		{"GET", "/api/live", [4]int{401, ok, ok, ok}},
 		{"GET", "/api/live/init/1", [4]int{401, ok, ok, ok}},

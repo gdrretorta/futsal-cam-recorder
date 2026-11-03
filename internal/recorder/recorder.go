@@ -67,6 +67,7 @@ type Recording struct {
 	Size       int64     `json:"size"`
 	ModTime    time.Time `json:"modTime"`
 	Processing bool      `json:"processing,omitempty"`
+	Protected  bool      `json:"protected,omitempty"` // "não apagar" (protect.go)
 }
 
 // Source returns the stream URL and the recordings directory. It is called at
@@ -110,6 +111,8 @@ type Recorder struct {
 	liveFailAt time.Time
 	liveIdle   time.Duration
 	index      liveIndex
+
+	keepMu sync.Mutex // protected.json (protect.go); never taken while holding mu
 }
 
 // New creates a recorder. stateFile remembers whether a recording was in
@@ -294,6 +297,9 @@ func (r *Recorder) List() ([]Recording, error) {
 		finalizing[k] = true
 	}
 	r.mu.Unlock()
+	r.keepMu.Lock()
+	keep := r.protected(dir)
+	r.keepMu.Unlock()
 
 	list := []Recording{}
 	for _, e := range entries {
@@ -304,13 +310,14 @@ func (r *Recorder) List() ([]Recording, error) {
 		if err != nil {
 			continue
 		}
-		list = append(list, Recording{Name: e.Name(), Size: info.Size(), ModTime: info.ModTime(), Processing: finalizing[e.Name()]})
+		list = append(list, Recording{Name: e.Name(), Size: info.Size(), ModTime: info.ModTime(), Processing: finalizing[e.Name()], Protected: keep[e.Name()]})
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Name > list[j].Name })
 	return list, nil
 }
 
-// Prune deletes recordings older than the given number of days.
+// Prune deletes recordings older than the given number of days, except the
+// protected ones.
 func (r *Recorder) Prune(days int) {
 	if days <= 0 {
 		return
@@ -323,7 +330,7 @@ func (r *Recorder) Prune(days int) {
 	_, dir := r.source()
 	cutoff := time.Now().AddDate(0, 0, -days)
 	for _, rec := range list {
-		if rec.ModTime.Before(cutoff) && !r.IsActive(rec.Name) {
+		if rec.ModTime.Before(cutoff) && !rec.Protected && !r.IsActive(rec.Name) {
 			if err := os.Remove(filepath.Join(dir, rec.Name)); err != nil {
 				r.log.Error("retention: delete failed", "file", rec.Name, "err", err)
 				continue

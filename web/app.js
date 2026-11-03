@@ -430,6 +430,7 @@ const ICONS = {
   link: '<svg viewBox="0 0 24 24"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3.2-3.2a4.5 4.5 0 0 0-6.4-6.4L12 5.6"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3.2 3.2a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/></svg>',
   download: '<svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>',
   edit: '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></svg>',
+  star: '<svg viewBox="0 0 24 24"><path d="m12 3.5 2.6 5.3 5.9.9-4.25 4.1 1 5.8L12 16.9l-5.25 2.7 1-5.8L3.5 9.7l5.9-.9L12 3.5Z"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
 };
 
@@ -473,9 +474,13 @@ function renderRecording(rec) {
   const play = iconButton("play", "Ver", () => openPlayer(rec, url));
   const link = iconButton("link", "Copiar link", () => copyLink(new URL(url, location.href).href));
   const dl = iconButton("download", "Descarregar", () => { location.href = url + "?download=1"; });
-  const del = iconButton("trash", "Apagar", () => confirmDelete(rec), "del");
-  for (const b of [play, link, dl, del]) b.disabled = !!rec.processing;
-  actions.append(play, link, dl, del);
+  const keep = iconButton("star", rec.protected ? "Protegida: não é apagada (tirar estrela)" : "Não apagar (proteger da limpeza automática)",
+    () => setProtected(rec, !rec.protected), rec.protected ? "keep on" : "keep");
+  keep.setAttribute("aria-pressed", rec.protected ? "true" : "false");
+  const del = iconButton("trash", rec.protected ? "Protegida: tire a estrela para apagar" : "Apagar", () => confirmDelete(rec), "del");
+  for (const b of [play, link, dl, keep, del]) b.disabled = !!rec.processing;
+  if (rec.protected) del.disabled = true;
+  actions.append(play, link, dl, keep, del);
 
   li.append(info, actions);
   return li;
@@ -522,6 +527,16 @@ function confirmAction(title, text, action) {
   dlg.returnValue = "";
   dlg.onclose = () => { if (dlg.returnValue === "ok") action(); };
   dlg.showModal();
+}
+
+async function setProtected(rec, on) {
+  try {
+    await api("PUT", `/api/recordings/${encodeURIComponent(rec.name)}/protected`, { protected: on });
+    toast(on ? "Gravação protegida: não vai ser apagada" : "Proteção retirada");
+  } catch (e) {
+    toast(e.message, true);
+  }
+  loadRecordings();
 }
 
 function confirmDelete(rec) {

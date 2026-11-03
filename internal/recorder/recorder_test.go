@@ -297,3 +297,33 @@ func TestResumeKeepsStartTime(t *testing.T) {
 		t.Fatal("state file left after stop")
 	}
 }
+
+// Retention keeps protected recordings, and the mark survives a new Recorder
+// (it is stored in the recordings folder).
+func TestPruneKeepsProtected(t *testing.T) {
+	dir := t.TempDir()
+	r := New("ffmpeg", func() (string, string) { return "", dir }, filepath.Join(dir, "state.json"), logging.Discard().Logger)
+	old := time.Now().AddDate(0, 0, -40)
+	for _, n := range []string{"2026-01-01_100000.mp4", "2026-01-02_100000.mp4"} {
+		p := filepath.Join(dir, n)
+		os.WriteFile(p, []byte("x"), 0o644)
+		os.Chtimes(p, old, old)
+	}
+	if err := r.SetProtected("2026-01-02_100000.mp4", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetProtected("2026-01-03_100000.mp4", true); !os.IsNotExist(err) {
+		t.Fatalf("protect a missing file = %v", err)
+	}
+	r = New("ffmpeg", func() (string, string) { return "", dir }, filepath.Join(dir, "state.json"), logging.Discard().Logger)
+	r.Prune(30)
+	list, _ := r.List()
+	if len(list) != 1 || list[0].Name != "2026-01-02_100000.mp4" || !list[0].Protected {
+		t.Fatalf("after prune = %+v", list)
+	}
+	r.SetProtected("2026-01-02_100000.mp4", false)
+	r.Prune(30)
+	if list, _ := r.List(); len(list) != 0 {
+		t.Fatalf("unprotected recording kept: %+v", list)
+	}
+}

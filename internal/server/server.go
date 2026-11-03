@@ -13,7 +13,8 @@
 //	POST   /api/recording/start      start recording                          [user]
 //	POST   /api/recording/stop       stop recording                           [user]
 //	GET    /api/recordings           list recordings                          [user]
-//	DELETE /api/recordings/{name}    delete a recording                       [user]
+//	DELETE /api/recordings/{name}    delete a recording (409 if protected)    [user]
+//	PUT    /api/recordings/{name}/protected {protected} "não apagar" mark     [user]
 //	GET    /recordings/{name}        play (range requests) or ?download=1     public
 //	GET    /api/snapshot             JPEG frame from the camera (cached)      [user]
 //	GET    /api/live?viewer=<id>     live view, HLS playlist; at most         [user]
@@ -99,6 +100,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/recording/stop", user(s.stop))
 	mux.HandleFunc("GET /api/recordings", user(s.list))
 	mux.HandleFunc("DELETE /api/recordings/{name}", user(s.remove))
+	mux.HandleFunc("PUT /api/recordings/{name}/protected", user(s.protect))
 	mux.HandleFunc("GET /recordings/{name}", s.serveRecording)
 	mux.HandleFunc("GET /api/snapshot", user(s.snapshot))
 	mux.HandleFunc("GET /api/live", user(s.livePlaylist))
@@ -208,6 +210,10 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if s.Recorder.IsProtected(filepath.Base(path)) {
+		writeError(w, http.StatusConflict, recorder.ErrProtected)
+		return
+	}
 	if err := os.Remove(path); err != nil {
 		code := http.StatusInternalServerError
 		if errors.Is(err, os.ErrNotExist) {
@@ -218,6 +224,29 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Log.Info("recording deleted", "file", filepath.Base(path), "remote", r.RemoteAddr)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// protect sets or clears the "não apagar" mark of a recording.
+func (s *Server) protect(w http.ResponseWriter, r *http.Request) {
+	path, ok := s.recordingPath(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Protected bool `json:"protected"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	if err := s.Recorder.SetProtected(filepath.Base(path), body.Protected); err != nil {
+		code := http.StatusInternalServerError
+		if errors.Is(err, os.ErrNotExist) {
+			code = http.StatusNotFound
+		}
+		writeError(w, code, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"protected": body.Protected})
 }
 
 func (s *Server) serveRecording(w http.ResponseWriter, r *http.Request) {

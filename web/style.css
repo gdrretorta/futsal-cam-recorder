@@ -164,6 +164,10 @@ h3 { font-size: 1rem; }
 @media (max-width: 600px) {
   .rec-time, .rec-file { display: none; }
   .rec-time-short { display: inline; }
+  /* Five actions: narrower buttons so the date still fits. */
+  .rec-item { padding: 10px 4px 10px 8px; gap: 6px; }
+  .rec-actions { gap: 0; }
+  .rec-actions .icon-btn { width: 32px; }
 }
 .empty { text-align: center; padding: 24px 0; }
 
@@ -231,6 +235,8 @@ h3 { font-size: 1rem; }
 .icon-btn:disabled { opacity: .35; cursor: not-allowed; }
 .icon-btn svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .icon-btn.del:hover:not(:disabled) { color: var(--danger); }
+.icon-btn.keep:hover:not(:disabled), .icon-btn.keep.on { color: var(--warn); }
+.icon-btn.keep.on svg { fill: currentColor; }
 .link-btn { font: inherit; font-size: .875rem; border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; }
 
 /* Footer */
