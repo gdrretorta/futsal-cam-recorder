@@ -604,6 +604,8 @@ async function openSettings() {
   fields.title.value = s.title;
   fields.autoUpdate.checked = s.autoUpdate;
   fields.notifyHours.value = s.notify.longRecordingHours;
+  fields.notifyCameraDown.value = s.notify.cameraDownMinutes;
+  fields.notifyLowDisk.value = s.notify.lowDiskGB;
   fields.notifyFrom.value = s.notify.from;
   fields.notifySite.value = s.notify.siteUrl;
   fields.notifyKey.value = "";
@@ -646,6 +648,8 @@ function formSettings() {
     tunnel: { autoUpdate: fields.tunnelAuto.checked },
     notify: {
       longRecordingHours: Number(fields.notifyHours.value) || 0,
+      cameraDownMinutes: Number(fields.notifyCameraDown.value) || 0,
+      lowDiskGB: Number(fields.notifyLowDisk.value) || 0,
       from: fields.notifyFrom.value.trim(),
       siteUrl: fields.notifySite.value.trim(),
       // Like the camera password: only sent when edited.

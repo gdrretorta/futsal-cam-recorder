@@ -66,7 +66,7 @@ func Default() Config {
 		Camera:        Camera{Port: 554},
 		RecordingsDir: "recordings",
 		AutoUpdate:    true,
-		Notify:        Notify{LongRecordingHours: 3},
+		Notify:        Notify{LongRecordingHours: 3, CameraDownMinutes: 5, LowDiskGB: 20},
 		Tunnel:        Tunnel{AutoUpdate: true},
 	}
 }
@@ -93,6 +93,14 @@ type Notify struct {
 	// LongRecordingHours alerts the admins when a recording runs this long,
 	// and again every hour after that. 0 turns the alert off.
 	LongRecordingHours int `json:"longRecordingHours"`
+	// CameraDownMinutes alerts the admins when, during a recording, the
+	// camera has sent nothing for this many minutes (and again when it is
+	// back). 0 turns the alert off.
+	CameraDownMinutes int `json:"cameraDownMinutes"`
+	// LowDiskGB alerts the admins when the free space of the recordings
+	// volume drops below this many GB (then daily while it stays low). 0
+	// turns the alert off.
+	LowDiskGB int `json:"lowDiskGB"`
 }
 
 // Enabled reports whether emails can be sent.
@@ -167,6 +175,10 @@ func (c *Config) Validate() error {
 		return errors.New("endereço da câmara inválido (indique só o IP ou nome)")
 	case c.Notify.LongRecordingHours < 0 || c.Notify.LongRecordingHours > 48:
 		return errors.New("o aviso de gravação longa tem de ser entre 0 e 48 horas")
+	case c.Notify.CameraDownMinutes < 0 || c.Notify.CameraDownMinutes > 240:
+		return errors.New("o aviso de câmara sem imagem tem de ser entre 0 e 240 minutos")
+	case c.Notify.LowDiskGB < 0 || c.Notify.LowDiskGB > 100000:
+		return errors.New("o aviso de pouco espaço em disco tem de ser entre 0 e 100000 GB")
 	}
 	c.Notify.From = strings.TrimSpace(c.Notify.From)
 	c.Notify.SiteURL = strings.TrimRight(strings.TrimSpace(c.Notify.SiteURL), "/")

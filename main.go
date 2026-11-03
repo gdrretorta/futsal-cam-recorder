@@ -39,6 +39,7 @@ import (
 	"github.com/gdrretorta/futsal-cam-recorder/internal/recorder"
 	"github.com/gdrretorta/futsal-cam-recorder/internal/server"
 	"github.com/gdrretorta/futsal-cam-recorder/internal/service"
+	"github.com/gdrretorta/futsal-cam-recorder/internal/sysinfo"
 	"github.com/gdrretorta/futsal-cam-recorder/internal/tunnel"
 	"github.com/gdrretorta/futsal-cam-recorder/internal/updater"
 	"github.com/gdrretorta/futsal-cam-recorder/web"
@@ -175,6 +176,17 @@ func run(ctx context.Context, exe, baseDir string, asService bool) (restart bool
 		Log:       log.Logger,
 	}
 	go alerts.Run(bgCtx)
+	health := &notify.HealthWatcher{
+		Config: store.Get,
+		Camera: func() (bool, bool, string) {
+			st := rec.Status()
+			down := st.State == recorder.StateConnecting || st.State == recorder.StateReconnecting
+			return st.StartedAt != nil && st.State != recorder.StateStopping, down, st.Error
+		},
+		Disk: func() (uint64, uint64, error) { return sysinfo.Disk(store.RecordingsDir()) },
+		Log:  log.Logger,
+	}
+	go health.Run(bgCtx)
 	go tun.Run(bgCtx)
 	rec.Resume()
 

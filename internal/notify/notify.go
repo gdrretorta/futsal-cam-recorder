@@ -109,7 +109,7 @@ func TestEmail(cfg config.Config) Email {
 	return Email{
 		To:      AdminEmails(cfg),
 		Subject: cfg.Title + ": email de teste",
-		Text:    "Os emails do gravador estão a funcionar. É aqui que vai receber os avisos de gravações longas." + siteLine(cfg),
+		Text:    "Os emails do gravador estão a funcionar. É aqui que vai receber os avisos (gravações longas, câmara sem imagem, pouco espaço em disco)." + siteLine(cfg),
 	}
 }
 

@@ -160,6 +160,8 @@
           <fieldset>
             <p class="muted hint">Os avisos vão para todos os administradores, pela <a href="https://resend.com" target="_blank" rel="noopener">Resend</a>.</p>
             <label>Avisar quando uma gravação passa de (horas, 0 = nunca)<input name="notifyHours" type="number" min="0" max="48" value="3"></label>
+            <label>Avisar quando, durante uma gravação, a câmara está sem imagem há (minutos, 0 = nunca)<input name="notifyCameraDown" type="number" min="0" max="240" value="5"></label>
+            <label>Avisar quando o espaço livre no disco desce abaixo de (GB, 0 = nunca)<input name="notifyLowDisk" type="number" min="0" max="100000" value="20"></label>
             <label>API key da Resend<input name="notifyKey" type="password" autocomplete="off" placeholder="re_…"></label>
             <label>Remetente (num domínio verificado na Resend)<input name="notifyFrom" placeholder="Gravador &lt;gravador@retorta.com&gt;"></label>
             <div class="test-row">

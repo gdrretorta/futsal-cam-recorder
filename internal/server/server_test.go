@@ -683,13 +683,14 @@ func TestNotifySettings(t *testing.T) {
 	addUser(t, srv, store, "user@example.com", config.RoleUser)
 	c := adminClient(t, srv)
 	_, body := doWith(t, c, "GET", srv.URL+"/api/settings", "")
-	if !strings.Contains(body, `"longRecordingHours":3`) || !strings.Contains(body, `"hasApiKey":false`) {
+	if !strings.Contains(body, `"longRecordingHours":3`) || !strings.Contains(body, `"cameraDownMinutes":5`) || !strings.Contains(body, `"lowDiskGB":20`) || !strings.Contains(body, `"hasApiKey":false`) {
 		t.Fatalf("defaults = %s", body)
 	}
 	var dto map[string]any
 	json.Unmarshal([]byte(body), &dto)
 	n := dto["notify"].(map[string]any)
 	n["apiKey"], n["from"], n["siteUrl"], n["longRecordingHours"] = "re_wrong", "Gravador <g@retorta.com>", "https://futsal.retorta.com/", 4
+	n["cameraDownMinutes"], n["lowDiskGB"] = 10, 50
 	payload, _ := json.Marshal(dto)
 
 	// The test uses the form, saved or not, and reports Resend's error.
@@ -712,7 +713,7 @@ func TestNotifySettings(t *testing.T) {
 		t.Fatalf("save = %d %s", resp.StatusCode, body)
 	}
 	got := store.Get().Notify
-	if got.ResendAPIKey != "re_secret" || got.SiteURL != "https://futsal.retorta.com" || got.LongRecordingHours != 4 {
+	if got.ResendAPIKey != "re_secret" || got.SiteURL != "https://futsal.retorta.com" || got.LongRecordingHours != 4 || got.CameraDownMinutes != 10 || got.LowDiskGB != 50 {
 		t.Fatalf("saved = %+v", got)
 	}
 	_, body = doWith(t, c, "GET", srv.URL+"/api/settings", "")

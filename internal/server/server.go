@@ -287,6 +287,8 @@ type settingsDTO struct {
 		From               string  `json:"from"`
 		SiteURL            string  `json:"siteUrl"`
 		LongRecordingHours int     `json:"longRecordingHours"`
+		CameraDownMinutes  int     `json:"cameraDownMinutes"`
+		LowDiskGB          int     `json:"lowDiskGB"`
 		APIKey             *string `json:"apiKey,omitempty"`
 		HasAPIKey          bool    `json:"hasApiKey"`
 	} `json:"notify"`
@@ -299,6 +301,7 @@ func toDTO(c config.Config) settingsDTO {
 	d.Camera.HasPassword = c.Camera.Password != ""
 	d.RecordingsDir, d.RetentionDays, d.AutoUpdate = c.RecordingsDir, c.RetentionDays, c.AutoUpdate
 	d.Notify.From, d.Notify.SiteURL, d.Notify.LongRecordingHours = c.Notify.From, c.Notify.SiteURL, c.Notify.LongRecordingHours
+	d.Notify.CameraDownMinutes, d.Notify.LowDiskGB = c.Notify.CameraDownMinutes, c.Notify.LowDiskGB
 	d.Notify.HasAPIKey = c.Notify.ResendAPIKey != ""
 	d.Tunnel.AutoUpdate = c.Tunnel.AutoUpdate
 	return d
@@ -318,7 +321,8 @@ func (d settingsDTO) apply(c config.Config) config.Config {
 	if d.Notify.APIKey != nil {
 		key = *d.Notify.APIKey
 	}
-	c.Notify = config.Notify{ResendAPIKey: key, From: d.Notify.From, SiteURL: d.Notify.SiteURL, LongRecordingHours: d.Notify.LongRecordingHours}
+	c.Notify = config.Notify{ResendAPIKey: key, From: d.Notify.From, SiteURL: d.Notify.SiteURL, LongRecordingHours: d.Notify.LongRecordingHours,
+		CameraDownMinutes: d.Notify.CameraDownMinutes, LowDiskGB: d.Notify.LowDiskGB}
 	c.Tunnel.AutoUpdate = d.Tunnel.AutoUpdate // serviceName is file only
 	return c
 }
