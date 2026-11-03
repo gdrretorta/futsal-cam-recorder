@@ -327,3 +327,72 @@ func TestPruneKeepsProtected(t *testing.T) {
 		t.Fatalf("unprotected recording kept: %+v", list)
 	}
 }
+
+func probeDuration(t *testing.T, path string) float64 {
+	t.Helper()
+	out, err := exec.Command("ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", path).Output()
+	if err != nil {
+		t.Fatalf("ffprobe %s: %v", path, err)
+	}
+	var d float64
+	fmt.Sscan(strings.TrimSpace(string(out)), &d)
+	return d
+}
+
+// A cut makes a new recording named after the excerpt's start, without
+// touching the original; with replace the original goes once it is ready.
+func TestCut(t *testing.T) {
+	ffmpeg := requireFFmpeg(t)
+	if _, err := exec.LookPath("ffprobe"); err != nil {
+		t.Skip("ffprobe not installed")
+	}
+	r, dir := newTestRecorder(t, "")
+	src := testSource(t, ffmpeg)
+	data, _ := os.ReadFile(src)
+	os.WriteFile(filepath.Join(dir, "2026-11-01_210000.mp4"), data, 0o644)
+
+	if _, err := r.Cut("2026-11-01_210000.mp4", 5*time.Second, 5*time.Second, false); err != ErrCutRange {
+		t.Fatalf("empty range = %v", err)
+	}
+	name, err := r.Cut("2026-11-01_210000.mp4", 5*time.Second, 10*time.Second, false)
+	if err != nil || name != "2026-11-01_210005.mp4" {
+		t.Fatalf("cut = %q %v", name, err)
+	}
+	if _, err := r.Cut("2026-11-01_210000.mp4", 0, 3*time.Second, false); err != ErrCutBusy && err != nil {
+		t.Fatalf("second cut = %v", err)
+	}
+	waitFor(t, "cut", func() bool { return r.Cutting() == "" })
+	if d := probeDuration(t, filepath.Join(dir, name)); d < 4.5 || d > 6.5 {
+		t.Fatalf("excerpt lasts %.2fs, want about 5", d)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "2026-11-01_210000.mp4")); err != nil {
+		t.Fatal("original deleted without replace")
+	}
+	if !r.TryLock() {
+		t.Fatal("still locked after the cut")
+	}
+	r.Unlock()
+
+	// Replace: refused while protected, then the original goes.
+	r.SetProtected("2026-11-01_210000.mp4", true)
+	if _, err := r.Cut("2026-11-01_210000.mp4", 0, 15*time.Second, true); err != ErrProtected {
+		t.Fatalf("replace protected = %v", err)
+	}
+	r.SetProtected("2026-11-01_210000.mp4", false)
+	name, err = r.Cut("2026-11-01_210000.mp4", 0, 15*time.Second, true)
+	if err != nil || name != "2026-11-01_210000_2.mp4" {
+		t.Fatalf("replace = %q %v", name, err)
+	}
+	waitFor(t, "cut", func() bool { return r.Cutting() == "" })
+	list, _ := r.List()
+	var names []string
+	for _, l := range list {
+		names = append(names, l.Name)
+	}
+	if strings.Join(names, ",") != "2026-11-01_210005.mp4,2026-11-01_210000.mp4" {
+		t.Fatalf("after replace = %v", names)
+	}
+	if d := probeDuration(t, filepath.Join(dir, "2026-11-01_210000.mp4")); d < 14 || d > 16 {
+		t.Fatalf("replaced lasts %.2fs, want about 15", d)
+	}
+}

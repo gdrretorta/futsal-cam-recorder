@@ -15,6 +15,8 @@
 //	GET    /api/recordings           list recordings                          [user]
 //	DELETE /api/recordings/{name}    delete a recording (409 if protected)    [user]
 //	PUT    /api/recordings/{name}/protected {protected} "não apagar" mark     [user]
+//	POST   /api/recordings/{name}/cut {from, to, replace} save an excerpt (seconds;
+//	                                 runs in the background) → 202 {name}     [user]
 //	GET    /recordings/{name}        play (range requests) or ?download=1     public
 //	GET    /api/snapshot             JPEG frame from the camera (cached)      [user]
 //	GET    /api/live?viewer=<id>     live view, HLS playlist; at most         [user]
@@ -101,6 +103,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/recordings", user(s.list))
 	mux.HandleFunc("DELETE /api/recordings/{name}", user(s.remove))
 	mux.HandleFunc("PUT /api/recordings/{name}/protected", user(s.protect))
+	mux.HandleFunc("POST /api/recordings/{name}/cut", user(s.cut))
 	mux.HandleFunc("GET /recordings/{name}", s.serveRecording)
 	mux.HandleFunc("GET /api/snapshot", user(s.snapshot))
 	mux.HandleFunc("GET /api/live", user(s.livePlaylist))
@@ -214,6 +217,10 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, recorder.ErrProtected)
 		return
 	}
+	if s.Recorder.Cutting() == filepath.Base(path) {
+		writeError(w, http.StatusConflict, recorder.ErrCutBusy)
+		return
+	}
 	if err := os.Remove(path); err != nil {
 		code := http.StatusInternalServerError
 		if errors.Is(err, os.ErrNotExist) {
@@ -247,6 +254,41 @@ func (s *Server) protect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"protected": body.Protected})
+}
+
+// cut saves part of a recording as a new one, optionally replacing it.
+func (s *Server) cut(w http.ResponseWriter, r *http.Request) {
+	path, ok := s.recordingPath(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		From    float64 `json:"from"`
+		To      float64 `json:"to"`
+		Replace bool    `json:"replace"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	sec := func(f float64) time.Duration { return time.Duration(f * float64(time.Second)) }
+	if body.From < 0 || body.To > 48*3600 {
+		writeError(w, http.StatusBadRequest, recorder.ErrCutRange)
+		return
+	}
+	name, err := s.Recorder.Cut(filepath.Base(path), sec(body.From), sec(body.To), body.Replace)
+	if err != nil {
+		code := http.StatusConflict
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			code = http.StatusNotFound
+		case errors.Is(err, recorder.ErrCutRange):
+			code = http.StatusBadRequest
+		}
+		writeError(w, code, err)
+		return
+	}
+	s.Log.Info("cut requested", "file", filepath.Base(path), "excerpt", name, "replace", body.Replace, "remote", r.RemoteAddr)
+	writeJSON(w, http.StatusAccepted, map[string]string{"name": name})
 }
 
 func (s *Server) serveRecording(w http.ResponseWriter, r *http.Request) {

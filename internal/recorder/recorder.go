@@ -59,6 +59,7 @@ type Status struct {
 	File       string     `json:"file,omitempty"`
 	Error      string     `json:"error,omitempty"`
 	Finalizing []string   `json:"finalizing,omitempty"`
+	Cutting    string     `json:"cutting,omitempty"` // recording being cut (cut.go)
 }
 
 // Recording is a file in the recordings directory.
@@ -96,6 +97,7 @@ type Recorder struct {
 	file       string
 	lastErr    string
 	finalizing map[string]bool
+	cutSrc     string // recording being cut (cut.go)
 	locked     bool
 	stop       chan struct{}
 	done       chan struct{}
@@ -139,7 +141,7 @@ func New(ffmpeg string, source Source, stateFile string, log *slog.Logger) *Reco
 func (r *Recorder) Status() Status {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	s := Status{State: r.state, File: r.file, Error: r.lastErr}
+	s := Status{State: r.state, File: r.file, Error: r.lastErr, Cutting: r.cutSrc}
 	if !r.startedAt.IsZero() {
 		t := r.startedAt
 		s.StartedAt = &t

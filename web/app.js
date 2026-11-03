@@ -209,7 +209,8 @@ function renderStatus() {
   }
 
   // Reload the list whenever a file starts, stops or finishes processing.
-  const key = `${r.state}|${r.file || ""}|${(r.finalizing || []).join(",")}`;
+  const key = `${r.state}|${r.file || ""}|${(r.finalizing || []).join(",")}|${r.cutting || ""}`;
+  cuttingName = r.cutting || "";
   if (key !== listKey) {
     listKey = key;
     loadRecordings();
@@ -444,6 +445,8 @@ function liveFollowState() {
 
 // ---------- Recordings ----------
 
+let cuttingName = ""; // recording being cut, from /api/status
+
 async function loadRecordings() {
   let list;
   try {
@@ -506,10 +509,10 @@ function renderRecording(rec) {
   const time = timeFmt.format(when);
   const span = (cls, text) => Object.assign(document.createElement("span"), { className: cls, textContent: text });
   name.append(dayFmt.format(when), span("rec-time", `, ${time}`));
-  if (rec.processing) {
+  if (rec.processing || rec.name === cuttingName) {
     const tag = document.createElement("span");
     tag.className = "tag";
-    tag.textContent = "A processar…";
+    tag.textContent = rec.processing ? "A processar…" : "A cortar…";
     name.append(tag);
   }
   const meta = document.createElement("div");
@@ -527,7 +530,7 @@ function renderRecording(rec) {
   keep.setAttribute("aria-pressed", rec.protected ? "true" : "false");
   const del = iconButton("trash", rec.protected ? "Protegida: tire a estrela para apagar" : "Apagar", () => confirmDelete(rec), "del");
   for (const b of [play, link, dl, keep, del]) b.disabled = !!rec.processing;
-  if (rec.protected) del.disabled = true;
+  if (rec.protected || rec.name === cuttingName) del.disabled = true;
   actions.append(play, link, dl, keep, del);
 
   li.append(info, actions);
@@ -556,11 +559,63 @@ async function copyLink(href) {
   else prompt("Copie o link:", href);
 }
 
+// ---------- Cutting (in the player) ----------
+
+let cut = null; // {rec, from, to} while the player is open
+
+function fmtClock(s) {
+  s = Math.max(0, Math.floor(s));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  const two = (n) => String(n).padStart(2, "0");
+  return h ? `${h}:${two(m)}:${two(sec)}` : `${m}:${two(sec)}`;
+}
+
+function renderCut() {
+  const to = cut.to ?? $("player").duration;
+  $("cutRange").textContent = Number.isFinite(to) ? `${fmtClock(cut.from)} → ${fmtClock(to)} (${fmtClock(to - cut.from)})` : "";
+  $("cutSaveBtn").disabled = !(Number.isFinite(to) && to - cut.from >= 1);
+}
+
 function openPlayer(rec, url) {
   $("playerTitle").textContent = dateFmt.format(recordingDate(rec));
+  cut = { rec, from: 0, to: null };
+  $("cutBar").hidden = true;
+  $("cutToggle").hidden = !!rec.processing;
+  $("cutReplace").checked = false;
+  $("cutReplace").disabled = !!rec.protected;
+  $("cutReplace").parentElement.title = rec.protected ? "Gravação protegida: tire a estrela para a poder apagar" : "";
+  renderCut();
   $("player").src = url;
   $("playerDlg").showModal();
 }
+$("player").addEventListener("loadedmetadata", () => { if (cut) renderCut(); });
+$("cutToggle").addEventListener("click", () => { $("cutBar").hidden = !$("cutBar").hidden; });
+$("cutStartBtn").addEventListener("click", () => {
+  cut.from = $("player").currentTime;
+  if (cut.to !== null && cut.to <= cut.from) cut.to = null;
+  renderCut();
+});
+$("cutEndBtn").addEventListener("click", () => {
+  cut.to = $("player").currentTime;
+  if (cut.to <= cut.from) cut.from = 0;
+  renderCut();
+});
+$("cutSaveBtn").addEventListener("click", () => {
+  const { rec } = cut;
+  const body = { from: cut.from, to: cut.to ?? $("player").duration, replace: $("cutReplace").checked };
+  const save = async () => {
+    try {
+      await api("POST", `/api/recordings/${encodeURIComponent(rec.name)}/cut`, body);
+      $("playerDlg").close();
+      toast(body.replace ? "A cortar… a gravação completa é apagada quando o excerto estiver pronto" : "A cortar… o excerto aparece na lista quando estiver pronto");
+    } catch (e) {
+      toast(e.message, true);
+    }
+    loadRecordings();
+  };
+  if (!body.replace) return save();
+  confirmAction("Ficar só com o excerto?", `A gravação completa (${fmtClock($("player").duration)}, ${fmtBytes(rec.size)}) é apagada e fica só o excerto de ${fmtClock(body.from)} a ${fmtClock(body.to)}.`, save, "Cortar");
+});
 $("playerDlg").addEventListener("close", () => {
   $("player").pause();
   $("player").removeAttribute("src");
@@ -568,9 +623,10 @@ $("playerDlg").addEventListener("close", () => {
 });
 
 // confirmAction asks before something that can't be undone, then runs action.
-function confirmAction(title, text, action) {
+function confirmAction(title, text, action, okLabel = "Apagar") {
   const dlg = $("confirmDlg");
   $("confirmTitle").textContent = title;
+  dlg.querySelector("button[value=ok]").textContent = okLabel;
   $("confirmText").textContent = text + " Esta ação não pode ser desfeita.";
   dlg.returnValue = "";
   dlg.onclose = () => { if (dlg.returnValue === "ok") action(); };

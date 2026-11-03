@@ -238,6 +238,21 @@
   <dialog id="playerDlg" class="dlg wide">
     <div class="dlg-head"><h3 id="playerTitle"></h3><button class="icon-btn" data-close aria-label="Fechar">✕</button></div>
     <video id="player" controls playsinline preload="metadata"></video>
+    <div class="cut">
+      <button type="button" id="cutToggle" class="btn">✂ Cortar</button>
+      <div id="cutBar" class="cut-bar" hidden>
+        <p class="muted hint">Ponha o vídeo no início do excerto e carregue em "Início aqui", depois no fim e em "Fim aqui". O excerto fica como uma gravação nova.</p>
+        <div class="cut-row">
+          <button type="button" id="cutStartBtn" class="btn">Início aqui</button>
+          <span id="cutRange" class="cut-range"></span>
+          <button type="button" id="cutEndBtn" class="btn">Fim aqui</button>
+        </div>
+        <label class="check"><input id="cutReplace" type="checkbox"> Apagar a gravação completa e ficar só com o excerto</label>
+        <div class="dlg-actions">
+          <button type="button" id="cutSaveBtn" class="btn primary">Guardar excerto</button>
+        </div>
+      </div>
+    </div>
   </dialog>
 
   <dialog id="confirmDlg" class="dlg">

@@ -187,6 +187,14 @@ func TestRecordingsEndpoints(t *testing.T) {
 		t.Fatal("file outside recordings dir was touched")
 	}
 
+	// Cuts check the range and the file before starting.
+	if resp, _ := do(t, "POST", srv.URL+"/api/recordings/2026-10-29_150000.mp4/cut", `{"from":10,"to":5}`); resp.StatusCode != 400 {
+		t.Fatalf("cut with end before start = %d, want 400", resp.StatusCode)
+	}
+	if resp, _ := do(t, "POST", srv.URL+"/api/recordings/2026-01-01_000000.mp4/cut", `{"from":0,"to":5}`); resp.StatusCode != 404 {
+		t.Fatalf("cut of a missing file = %d, want 404", resp.StatusCode)
+	}
+
 	// A protected recording can't be deleted until the mark is removed.
 	if resp, body := do(t, "PUT", srv.URL+"/api/recordings/2026-10-29_150000.mp4/protected", `{"protected":true}`); resp.StatusCode != 200 || body != `{"protected":true}`+"\n" {
 		t.Fatalf("protect = %d %s", resp.StatusCode, body)
@@ -275,6 +283,7 @@ func TestAccessByRole(t *testing.T) {
 		{"POST", "/api/recording/stop", [4]int{401, ok, ok, ok}},
 		{"DELETE", "/api/recordings/2026-01-01_000000.mp4", [4]int{401, ok, ok, ok}},
 		{"PUT", "/api/recordings/2026-01-01_000000.mp4/protected", [4]int{401, ok, ok, ok}},
+		{"POST", "/api/recordings/2026-01-01_000000.mp4/cut", [4]int{401, ok, ok, ok}},
 		{"GET", "/api/snapshot", [4]int{401, ok, ok, ok}},
 		{"GET", "/api/live", [4]int{401, ok, ok, ok}},
 		{"GET", "/api/live/init/1", [4]int{401, ok, ok, ok}},
