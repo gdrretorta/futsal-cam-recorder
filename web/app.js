@@ -384,7 +384,10 @@ async function startLive() {
       const Hls = await loadHls();
       if (!liveWanted || document.hidden) return;
       if (!Hls.isSupported()) throw new Error("este browser não consegue mostrar o direto");
-      const hls = new Hls({ liveSyncDurationCount: 2, liveMaxLatencyDurationCount: 6, maxLiveSyncPlaybackRate: 1.2, backBufferLength: 10 });
+      // Always at normal speed: catching up after a camera hiccup by
+      // playing faster looked like the video was sped up. Three segments
+      // of buffer absorb most hiccups; past ten behind, it jumps ahead.
+      const hls = new Hls({ liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 10, maxLiveSyncPlaybackRate: 1, backBufferLength: 10 });
       hls.on(Hls.Events.ERROR, (_, d) => {
         if (d.fatal) liveFailed(new Error("o direto foi interrompido"));
       });
