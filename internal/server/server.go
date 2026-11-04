@@ -37,6 +37,8 @@
 //	POST   /api/settings/notify-test send a test email to the admins          [admin]
 //	POST   /api/update/check         check for updates now                    [admin]
 //	GET    /api/logs                 recent log lines                         [admin]
+//	GET    /api/system               PC metrics: CPU, memory, disk, network,  [admin]
+//	                                 uptime
 //	GET    /api/tunnel               cloudflared versions and update state    [admin]
 //	POST   /api/tunnel/update        update cloudflared now (when idle)       [admin]
 package server
@@ -81,6 +83,8 @@ type Server struct {
 
 	auth *auth
 
+	sys sysinfo.Sampler
+
 	snapMu   sync.Mutex
 	snapAt   time.Time
 	snapData []byte
@@ -123,6 +127,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/settings/notify-test", admin(s.testNotify))
 	mux.HandleFunc("POST /api/update/check", admin(s.checkUpdate))
 	mux.HandleFunc("GET /api/logs", admin(s.logs))
+	mux.HandleFunc("GET /api/system", admin(s.system))
 	mux.HandleFunc("GET /api/tunnel", admin(s.tunnelStatus))
 	mux.HandleFunc("POST /api/tunnel/update", admin(s.tunnelUpdate))
 	mux.Handle("GET /", newStaticHandler(s.Static))
@@ -487,6 +492,19 @@ func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
 
 // tunnelStatus also refreshes the versions in the background when they are
 // more than an hour old, so the settings page shows current ones.
+// system reports the PC's metrics. Only OS counters are read, so the page
+// can poll it while a recording runs.
+func (s *Server) system(w http.ResponseWriter, r *http.Request) {
+	resp := struct {
+		sysinfo.Metrics
+		Disk *disk `json:"disk,omitempty"`
+	}{Metrics: s.sys.Read()}
+	if free, total, err := sysinfo.Disk(existingParent(s.Store.RecordingsDir())); err == nil {
+		resp.Disk = &disk{free, total}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (s *Server) tunnelStatus(w http.ResponseWriter, r *http.Request) {
 	st := s.Tunnel.Status()
 	if st.State == "idle" && time.Since(st.LastCheck) > time.Hour {

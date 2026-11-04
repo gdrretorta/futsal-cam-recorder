@@ -330,6 +330,20 @@ input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 50%, transpare
   .sys-actions .btn { min-height: 44px; }
 }
 
+/* Settings › Sistema › PC: metrics tiles. */
+.pc-updated { font-size: .85rem; }
+.pc-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 700px) { .pc-grid { grid-template-columns: 1fr 1fr; } }
+.pc-tile { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; min-width: 0; }
+.pc-label { font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.pc-tile strong { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.pc-tile .muted { font-size: .85rem; }
+.pc-bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.pc-bar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+.pc-bar span.warn { background: var(--warn); }
+.pc-bar span.bad { background: var(--danger); }
+@media (max-width: 480px) { .pc-tile { padding: 10px; } .pc-tile strong { font-size: 1.15rem; } }
+
 .logs-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
 .logs-head h3 { margin: 0; }
 .logs-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

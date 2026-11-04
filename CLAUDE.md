@@ -23,7 +23,7 @@ internal/service            Windows service run/install/uninstall (stub on other
 internal/tunnel             keeps cloudflared (the tunnel connector, a Windows service) up to date, with rollback
 internal/notify             emails to the admins through the Resend API; Watcher = long-recording alert
 internal/logging            slog → rotating file logs/recorder.log + stdout + in-memory tail for /api/logs
-internal/sysinfo            free disk space (windows / unix)
+internal/sysinfo            free disk space; PC metrics for "Sistema" (CPU, memory, network, uptime) from OS counters only
 web/                        index.html, app.js, style.css, icons, manifest.webmanifest (installable app; embedded), hls.light.min.js (vendored hls.js for the live view)
 scripts/fake-camera.sh      local RTSP test camera (mediamtx + ffmpeg test pattern)
 install.ps1                 one-time installer/upgrader (irm | iex)

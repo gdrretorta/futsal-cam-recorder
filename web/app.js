@@ -678,7 +678,10 @@ function clearSettingsHash() {
 function showSettings(open) {
   settingsOpen = open;
   applyAccess();
-  if (!open) clearTimeout(loadTunnel.t);
+  if (!open) {
+    clearTimeout(loadTunnel.t);
+    clearTimeout(loadSystem.t);
+  }
 }
 
 // closeSettings returns to the recorder, also from the address bar's point of view.
@@ -748,6 +751,7 @@ async function openSettings() {
   window.scrollTo(0, 0);
   renderUpdate();
   loadTunnel();
+  loadSystem();
   loadLogs();
   return true;
 }
@@ -819,6 +823,85 @@ async function loadTunnel() {
   setState($("tunnelState"), st);
   $("tunnelUpdateBtn").disabled = busy || t.state === "unsupported";
   loadTunnel.t = setTimeout(loadTunnel, busy || !t.installed ? 3000 : 30000);
+}
+
+// ---------- PC metrics ----------
+
+const SYSTEM_INTERVAL = 5000;
+
+// "3 d 4 h", "2 h 15 min", "12 min".
+function fmtUptime(sec) {
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+  if (d) return `${d} d ${h} h`;
+  if (h) return `${h} h ${m} min`;
+  return `${m} min`;
+}
+
+function fmtRate(bytesPerSec) {
+  const mbit = (bytesPerSec * 8) / 1e6;
+  return mbit >= 10 ? `${mbit.toFixed(0)} Mbit/s` : `${mbit.toFixed(1)} Mbit/s`;
+}
+
+function setBar(id, pct, warnAt, badAt) {
+  const el = $(id);
+  el.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+  el.className = pct >= badAt ? "bad" : pct >= warnAt ? "warn" : "";
+}
+
+// Polled only while the settings are open and the page visible; the server
+// only reads OS counters, so this never touches the recording.
+async function loadSystem() {
+  clearTimeout(loadSystem.t);
+  if (!settingsOpen) return;
+  if (!document.hidden) {
+    try {
+      renderSystem(await api("GET", "/api/system"));
+    } catch {
+      $("pcUpdated").textContent = "Sem ligação ao PC";
+    }
+  }
+  loadSystem.t = setTimeout(loadSystem, SYSTEM_INTERVAL);
+}
+
+function renderSystem(m) {
+  const na = "indisponível";
+  if (m.cpuPercent != null) {
+    $("pcCpu").textContent = `${Math.round(m.cpuPercent)}%`;
+    setBar("pcCpuBar", m.cpuPercent, 70, 90);
+  } else $("pcCpu").textContent = "—";
+  $("pcCpuSub").textContent = `${m.cpus} ${m.cpus === 1 ? "núcleo" : "núcleos"}`;
+
+  if (m.memTotal) {
+    const used = m.memTotal - m.memAvailable, pct = (used / m.memTotal) * 100;
+    $("pcMem").textContent = `${Math.round(pct)}%`;
+    $("pcMemSub").textContent = `${fmtBytes(used)} de ${fmtBytes(m.memTotal)}`;
+    setBar("pcMemBar", pct, 80, 92);
+  } else {
+    $("pcMem").textContent = "—";
+    $("pcMemSub").textContent = na;
+  }
+
+  if (m.disk && m.disk.total) {
+    const pct = ((m.disk.total - m.disk.free) / m.disk.total) * 100;
+    $("pcDisk").textContent = `${fmtBytes(m.disk.free)} livres`;
+    $("pcDiskSub").textContent = `de ${fmtBytes(m.disk.total)} (${Math.round(pct)}% ocupado)`;
+    setBar("pcDiskBar", pct, 85, 95);
+  } else {
+    $("pcDisk").textContent = "—";
+    $("pcDiskSub").textContent = na;
+  }
+
+  if (m.netRxRate != null) {
+    $("pcNet").textContent = `↓ ${fmtRate(m.netRxRate)}`; // the camera's stream counts here
+    $("pcNetSub").textContent = `↑ ${fmtRate(m.netTxRate)} enviados`;
+  } else {
+    $("pcNet").textContent = "—";
+    $("pcNetSub").textContent = na;
+  }
+
+  $("pcUptime").textContent = m.uptimeSeconds != null ? fmtUptime(m.uptimeSeconds) : "—";
+  $("pcProcess").textContent = fmtUptime(m.processSeconds);
+  $("pcUpdated").textContent = "atualizado a cada 5 s";
 }
 
 $("tunnelUpdateBtn").addEventListener("click", async () => {
@@ -929,6 +1012,7 @@ function applyAccess() {
 function clearRecorder() {
   document.querySelectorAll("dialog[open]").forEach((d) => d.close());
   clearTimeout(loadTunnel.t);
+  clearTimeout(loadSystem.t);
   status = null;
   recordings = [];
   listKey = "";

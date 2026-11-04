@@ -299,6 +299,7 @@ func TestAccessByRole(t *testing.T) {
 		{"POST", "/api/update/check", [4]int{401, 403, 403, ok}},
 		{"GET", "/api/logs", [4]int{401, 403, 403, ok}},
 		{"GET", "/api/tunnel", [4]int{401, 403, 403, ok}},
+		{"GET", "/api/system", [4]int{401, 403, 403, ok}},
 		{"POST", "/api/tunnel/update", [4]int{401, 403, 403, ok}},
 		{"PUT", "/api/me/password", [4]int{401, ok, ok, ok}},
 	} {
@@ -813,7 +814,7 @@ func TestLocalAccess(t *testing.T) {
 		t.Fatalf("status on the PC = %d", resp.StatusCode)
 	}
 	for _, r := range []struct{ method, path string }{
-		{"GET", "/api/settings"}, {"PUT", "/api/settings"}, {"GET", "/api/users"}, {"POST", "/api/users"}, {"GET", "/api/logs"}, {"POST", "/api/update/check"},
+		{"GET", "/api/settings"}, {"PUT", "/api/settings"}, {"GET", "/api/users"}, {"POST", "/api/users"}, {"GET", "/api/logs"}, {"GET", "/api/system"}, {"POST", "/api/update/check"},
 	} {
 		if resp, _ := doWith(t, anon, r.method, local.URL+r.path, `{"email":"evil@x.pt","role":"admin","password":"password1"}`); resp.StatusCode != 403 {
 			t.Errorf("%s %s on the PC without login = %d, want 403", r.method, r.path, resp.StatusCode)
@@ -872,5 +873,24 @@ func TestTunnelEndpoints(t *testing.T) {
 	}
 	if store.Get().Tunnel.AutoUpdate {
 		t.Fatal("autoUpdate not saved")
+	}
+}
+
+func TestSystemMetrics(t *testing.T) {
+	srv, _ := newTestServer(t)
+	resp, body := doWith(t, adminClient(t, srv), "GET", srv.URL+"/api/system", "")
+	if resp.StatusCode != 200 {
+		t.Fatalf("system = %d %s", resp.StatusCode, body)
+	}
+	var m struct {
+		CPUs           int `json:"cpus"`
+		ProcessSeconds *int64
+		Disk           *struct{ Free, Total uint64 }
+	}
+	if err := json.Unmarshal([]byte(body), &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.CPUs < 1 || m.ProcessSeconds == nil || m.Disk == nil || m.Disk.Total == 0 {
+		t.Errorf("system = %s", body)
 	}
 }

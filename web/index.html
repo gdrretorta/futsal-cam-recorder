@@ -172,6 +172,20 @@
       </div>
       <div id="s-system" class="system">
         <section class="card settings-section">
+          <div class="logs-head">
+            <h3>PC</h3>
+            <span id="pcUpdated" class="muted pc-updated"></span>
+          </div>
+          <div class="pc-grid">
+            <div class="pc-tile"><span class="pc-label">Processador</span><strong id="pcCpu">—</strong><div class="pc-bar"><span id="pcCpuBar"></span></div><span id="pcCpuSub" class="muted"></span></div>
+            <div class="pc-tile"><span class="pc-label">Memória</span><strong id="pcMem">—</strong><div class="pc-bar"><span id="pcMemBar"></span></div><span id="pcMemSub" class="muted"></span></div>
+            <div class="pc-tile"><span class="pc-label">Disco das gravações</span><strong id="pcDisk">—</strong><div class="pc-bar"><span id="pcDiskBar"></span></div><span id="pcDiskSub" class="muted"></span></div>
+            <div class="pc-tile" title="Tráfego das placas de rede do PC. A imagem da câmara conta na receção (↓)."><span class="pc-label">Rede</span><strong id="pcNet">—</strong><span id="pcNetSub" class="muted"></span></div>
+            <div class="pc-tile"><span class="pc-label">PC ligado há</span><strong id="pcUptime">—</strong><span class="muted">desde o arranque do Windows</span></div>
+            <div class="pc-tile"><span class="pc-label">Gravador a correr há</span><strong id="pcProcess">—</strong><span class="muted">desde a última atualização</span></div>
+          </div>
+        </section>
+        <section class="card settings-section">
           <h3>Atualizações</h3>
           <div class="sys-row">
             <div class="sys-name"><strong>Gravador</strong><span id="sysVersion" class="muted"></span></div>
