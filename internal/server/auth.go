@@ -282,9 +282,13 @@ type userDTO struct {
 	Email              string      `json:"email"`
 	Role               config.Role `json:"role"`
 	MustChangePassword bool        `json:"mustChangePassword"`
+	// InvitePending: invited by email, hasn't chosen a password yet.
+	InvitePending bool `json:"invitePending"`
 }
 
-func toUserDTO(u config.User) userDTO { return userDTO{u.ID, u.Email, u.Role, u.MustChangePassword} }
+func toUserDTO(u config.User) userDTO {
+	return userDTO{u.ID, u.Email, u.Role, u.MustChangePassword, u.InvitePending()}
+}
 
 type meDTO struct {
 	// AuthRequired is false while there are no users: the recorder is open.

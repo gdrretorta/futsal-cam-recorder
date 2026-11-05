@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // An install upgraded from 2.6 has only adminPasswordHash: it must become an
@@ -143,5 +144,29 @@ func TestGetCopiesUsers(t *testing.T) {
 	cfg.Users[0].Role = RoleUser
 	if s.Get().Users[0].Role != RoleAdmin {
 		t.Fatal("Get shares the users slice")
+	}
+}
+
+func TestInviteExpires(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddUser("admin@example.com", RoleAdmin, "password1", false); err != nil {
+		t.Fatal(err)
+	}
+	u, token, err := s.InviteUser("new@example.com", RoleUser)
+	if err != nil || !u.InvitePending() {
+		t.Fatalf("invite = %+v, %v", u, err)
+	}
+	if _, err := invited(s.Get().Users, token, time.Now().Add(InviteDuration+time.Minute)); err != ErrInviteExpired {
+		t.Fatalf("after expiry = %v", err)
+	}
+	// Setting a password some other way (add-user on the PC) ends the invite.
+	if _, err := s.SetUser("new@example.com", RoleUser, "password2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.InvitedUser(token); err != ErrBadInvite {
+		t.Fatalf("after add-user = %v", err)
 	}
 }

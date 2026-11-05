@@ -67,6 +67,19 @@
     </form>
   </main>
 
+  <main id="inviteView" class="login-view" hidden>
+    <form id="inviteForm" class="card login-card">
+      <h2>Bem-vindo</h2>
+      <p id="inviteText" class="muted"></p>
+      <input name="email" type="email" autocomplete="username" hidden>
+      <label>Palavra-passe (mínimo 8 caracteres)<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+      <label>Repita a palavra-passe<input name="confirm" type="password" autocomplete="new-password" minlength="8" required></label>
+      <p id="inviteError" class="state-error" hidden></p>
+      <button type="submit" class="btn primary">Guardar e entrar</button>
+      <button type="button" id="inviteLoginBtn" class="link-btn">Ir para o início de sessão</button>
+    </form>
+  </main>
+
   <main id="app" class="layout" hidden>
     <section class="card camera">
       <div class="preview">
@@ -306,14 +319,25 @@
     </div>
   </dialog>
 
+  <dialog id="inviteLinkDlg" class="dlg narrow">
+    <div class="dlg-head"><h3>Convite não enviado</h3><button class="icon-btn" data-close aria-label="Fechar">✕</button></div>
+    <p id="inviteLinkText"></p>
+    <p id="inviteLinkError" class="muted hint"></p>
+    <label>Link do convite<input id="inviteLinkUrl" readonly></label>
+    <div class="dlg-actions">
+      <button class="btn" data-close>Fechar</button>
+      <button id="inviteLinkCopy" class="btn primary">Copiar link</button>
+    </div>
+  </dialog>
+
   <dialog id="userDlg" class="dlg narrow">
     <form id="userForm">
       <div class="dlg-head"><h3 id="userDlgTitle"></h3><button type="button" class="icon-btn" data-close aria-label="Fechar">✕</button></div>
       <fieldset>
         <label>Email<input name="email" type="email" autocomplete="off" required></label>
         <label>Perfil<select name="role"></select></label>
-        <label><span id="userPasswordLabel"></span><input name="password" type="password" autocomplete="new-password" minlength="8"></label>
-        <p id="userPasswordHint" class="muted hint">Envie a palavra-passe à pessoa. No primeiro login vai ter de escolher uma nova.</p>
+        <label id="userPasswordField"><span id="userPasswordLabel"></span><input name="password" type="password" autocomplete="new-password" minlength="8"></label>
+        <p id="userPasswordHint" class="muted hint"></p>
       </fieldset>
       <p id="userError" class="state-error" hidden></p>
       <div class="dlg-actions">

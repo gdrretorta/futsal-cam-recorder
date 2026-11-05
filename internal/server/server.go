@@ -28,9 +28,15 @@
 //	POST   /api/logout               end the session
 //	PUT    /api/me/password          {currentPassword, password}              [account]
 //	GET    /api/users                list users                               [users]
-//	POST   /api/users                {email, role, password} create a user    [users]
+//	POST   /api/users                {email, role, password?} create a user;  [users]
+//	                                 without a password, emails an invite link
+//	                                 → {…user, inviteSent, inviteUrl, inviteError}
 //	PUT    /api/users/{id}           {email?, role?, password?} change a user [users]
 //	DELETE /api/users/{id}           delete a user                            [users]
+//	POST   /api/users/{id}/invite    send a new invite link (old one stops)   [users]
+//	POST   /api/invite               {token} → {email} of the invite link
+//	POST   /api/invite/accept        {token, password} set the password of an
+//	                                 invited user → session cookie
 //	GET    /api/settings             settings (password never returned)       [admin]
 //	PUT    /api/settings             save settings                            [admin]
 //	POST   /api/settings/test        test camera settings, returns a JPEG     [admin]
@@ -121,6 +127,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/users", users(s.createUser))
 	mux.HandleFunc("PUT /api/users/{id}", users(s.updateUser))
 	mux.HandleFunc("DELETE /api/users/{id}", users(s.deleteUser))
+	mux.HandleFunc("POST /api/users/{id}/invite", users(s.reinvite))
+	mux.HandleFunc("POST /api/invite", s.checkInvite)
+	mux.HandleFunc("POST /api/invite/accept", s.acceptInvite)
 	mux.HandleFunc("GET /api/settings", admin(s.getSettings))
 	mux.HandleFunc("PUT /api/settings", admin(s.putSettings))
 	mux.HandleFunc("POST /api/settings/test", admin(s.testSettings))

@@ -207,3 +207,13 @@ func (w *Watcher) Check(ctx context.Context) {
 	w.sentHours, w.lastTry = hours, time.Time{}
 	w.Log.Info("long recording alert sent", "hours", hours, "to", strings.Join(email.To, ", "))
 }
+
+// InviteEmail invites a new user to choose their password through link.
+func InviteEmail(cfg config.Config, to, link, by string) Email {
+	return Email{
+		To:      []string{to},
+		Subject: cfg.Title + ": convite",
+		Text: fmt.Sprintf("Olá,\n\n%s criou-lhe uma conta no %s, com o email %s.\n\nPara entrar, escolha a sua palavra-passe neste link:\n\n%s\n\nO link funciona durante %d dias e só pode ser usado uma vez. Se não estava à espera deste email, pode ignorá-lo.",
+			by, cfg.Title, to, link, int(config.InviteDuration.Hours()/24)),
+	}
+}

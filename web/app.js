@@ -54,9 +54,12 @@ async function api(method, url, body) {
   return null;
 }
 
+// authScreen: the login, "choose your password" or invite page is showing.
+const authScreen = () => !($("loginView").hidden && $("passwordView").hidden && $("inviteView").hidden);
+
 function toast(msg, isError = false) {
   // Requests cut short by a logout, or refused until the password is changed.
-  if (isError && !($("loginView").hidden && $("passwordView").hidden)) return;
+  if (isError && authScreen()) return;
   const el = $("toast");
   el.textContent = msg;
   el.classList.toggle("error", isError);
@@ -116,7 +119,7 @@ async function refreshStatus() {
     return;
   }
   if (s.loginRequired) {
-    if ($("loginView").hidden && $("passwordView").hidden) loadMe();
+    if (!authScreen()) loadMe();
     return;
   }
   status = s;
@@ -485,6 +488,7 @@ const ICONS = {
   download: '<svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>',
   edit: '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></svg>',
   star: '<svg viewBox="0 0 24 24"><path d="m12 3.5 2.6 5.3 5.9.9-4.25 4.1 1 5.8L12 16.9l-5.25 2.7 1-5.8L3.5 9.7l5.9-.9L12 3.5Z"/></svg>',
+  mail: '<svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
 };
 
@@ -962,11 +966,13 @@ async function loadMe() {
 let wantLogin = false; // on the PC itself: the user asked to log in
 
 function applyAccess() {
+  if (inviteToken) return; // the invite page stays until it is done
   const loggedOut = (me.authRequired && !me.user) || wantLogin;
   const mustChange = !!(me.user && me.user.mustChangePassword);
   $("bootView").hidden = true;
   const wasMustChange = !$("passwordView").hidden;
-  const wasLoggedOut = !$("loginView").hidden || wasMustChange;
+  const wasLoggedOut = !$("loginView").hidden || wasMustChange || !$("inviteView").hidden;
+  $("inviteView").hidden = true;
   $("loginView").hidden = !loggedOut;
   $("passwordView").hidden = !mustChange;
   if ((loggedOut || mustChange) && settingsOpen) {
@@ -1068,6 +1074,63 @@ loginForm.addEventListener("submit", async (ev) => {
   }
 });
 
+// ---------- Invite (link emailed to a new user) ----------
+
+// The token comes in the link's fragment (#convite=…), so it never reaches a
+// server log. It is taken off the address bar at once.
+const INVITE_HASH = "#convite=";
+let inviteToken = location.hash.startsWith(INVITE_HASH) ? location.hash.slice(INVITE_HASH.length) : null;
+if (inviteToken) history.replaceState(null, "", location.pathname + location.search);
+const inviteForm = $("inviteForm");
+// An invite link opened in a tab already on this page only changes the hash.
+window.addEventListener("hashchange", () => { if (location.hash.startsWith(INVITE_HASH)) location.reload(); });
+
+async function openInvite() {
+  $("bootView").hidden = true;
+  $("topbarActions").hidden = true;
+  $("app").hidden = true;
+  document.querySelector("body > footer").hidden = true;
+  $("inviteView").hidden = false;
+  $("inviteError").hidden = true;
+  inviteForm.reset();
+  try {
+    const { email } = await api("POST", "/api/invite", { token: inviteToken });
+    $("inviteText").textContent = `Escolha a palavra-passe da sua conta, ${email}. A partir daí, entra com este email e esta palavra-passe.`;
+    inviteForm.elements.email.value = email;
+    inviteForm.querySelectorAll("label, button[type=submit]").forEach((el) => (el.hidden = false));
+    inviteForm.elements.password.focus();
+  } catch (e) {
+    $("inviteText").textContent = e.message.charAt(0).toUpperCase() + e.message.slice(1);
+    inviteForm.querySelectorAll("label, button[type=submit]").forEach((el) => (el.hidden = true));
+  }
+}
+
+inviteForm.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = inviteForm.elements;
+  const err = $("inviteError");
+  err.hidden = true;
+  if (f.password.value !== f.confirm.value) {
+    err.textContent = "As palavras-passe não coincidem.";
+    err.hidden = false;
+    return;
+  }
+  try {
+    me = await api("POST", "/api/invite/accept", { token: inviteToken, password: f.password.value });
+    inviteToken = null;
+    toast("Palavra-passe guardada. Bem-vindo!");
+    applyAccess();
+  } catch (e) {
+    err.textContent = e.message;
+    err.hidden = false;
+  }
+});
+
+$("inviteLoginBtn").addEventListener("click", () => {
+  inviteToken = null;
+  loadMe();
+});
+
 const accountForm = $("accountForm");
 
 $("loginBackBtn").addEventListener("click", () => {
@@ -1140,7 +1203,7 @@ function renderUser(u) {
   const meta = document.createElement("div");
   meta.className = "muted";
   meta.textContent = (ROLES[u.role] || u.role) + (u.id === me.user.id ? " · a sua conta" : "") +
-    (u.mustChangePassword ? " · ainda não escolheu a palavra-passe" : "");
+    (u.invitePending ? " · convite por aceitar" : u.mustChangePassword ? " · ainda não escolheu a palavra-passe" : "");
   info.append(name, meta);
 
   // User managers only manage plain users (the server refuses the rest too).
@@ -1160,6 +1223,16 @@ function renderUser(u) {
   edit.disabled = locked;
   del.disabled = locked || u.id === me.user.id;
   if (locked) edit.title = del.title = "Só um administrador pode alterar administradores e gestores de utilizadores";
+  if (u.invitePending && !locked) {
+    actions.append(iconButton("mail", "Reenviar convite", async () => {
+      try {
+        inviteResult(await api("POST", `/api/users/${encodeURIComponent(u.id)}/invite`));
+      } catch (e) {
+        toast(e.message, true);
+      }
+      openUsers();
+    }));
+  }
   actions.append(edit, del);
   li.append(info, actions);
   return li;
@@ -1177,10 +1250,14 @@ function openUserForm(u) {
   select.value = u ? u.role : "user";
   select.disabled = roles.length === 1;
   userForm.elements.email.value = u ? u.email : "";
-  userForm.elements.password.required = !u;
+  // A new user gets an email with a link to choose their own password.
   const self = u && u.id === me.user.id;
-  userForm.elements.password.placeholder = u ? "Deixe vazio para manter" : "";
-  $("userPasswordLabel").textContent = u ? "Nova palavra-passe" : "Palavra-passe temporária (mínimo 8 caracteres)";
+  $("userPasswordField").hidden = !u;
+  userForm.elements.password.placeholder = "Deixe vazio para manter";
+  $("userPasswordLabel").textContent = "Nova palavra-passe";
+  $("userPasswordHint").textContent = u
+    ? "Envie a palavra-passe à pessoa. No próximo login vai ter de escolher uma nova."
+    : "A pessoa recebe um email com um link para escolher a palavra-passe.";
   $("userPasswordHint").hidden = self;
   $("userDlgTitle").textContent = u ? "Editar utilizador" : "Novo utilizador";
   $("userError").hidden = true;
@@ -1192,15 +1269,19 @@ userForm.addEventListener("submit", async (ev) => {
   const body = {
     email: userForm.elements.email.value.trim(),
     role: userForm.elements.role.value,
-    password: userForm.elements.password.value,
   };
+  if (editingUser) body.password = userForm.elements.password.value;
   try {
-    if (editingUser) await api("PUT", `/api/users/${encodeURIComponent(editingUser.id)}`, body);
-    else await api("POST", "/api/users", body);
-    $("userDlg").close();
-    const reset = !editingUser || (body.password && editingUser.id !== me.user.id);
-    toast((editingUser ? "Utilizador guardado" : "Utilizador criado") +
-      (reset ? ". Vai ter de escolher uma palavra-passe nova ao entrar." : ""), false);
+    if (editingUser) {
+      await api("PUT", `/api/users/${encodeURIComponent(editingUser.id)}`, body);
+      $("userDlg").close();
+      const reset = body.password && editingUser.id !== me.user.id;
+      toast("Utilizador guardado" + (reset ? ". Vai ter de escolher uma palavra-passe nova ao entrar." : ""));
+    } else {
+      const res = await api("POST", "/api/users", body);
+      $("userDlg").close();
+      inviteResult(res);
+    }
     // Editing yourself can change what you may see.
     if (editingUser && editingUser.id === me.user.id) await loadMe();
     if (role() === "admin" || role() === "userManager") openUsers();
@@ -1210,6 +1291,21 @@ userForm.addEventListener("submit", async (ev) => {
     $("userError").hidden = false;
   }
 });
+
+// inviteResult says whether the invite email went out; when it didn't, it
+// shows the link so it can be sent another way (WhatsApp…).
+function inviteResult(res) {
+  if (res.inviteSent) {
+    toast(`Convite enviado para ${res.email}`);
+    return;
+  }
+  $("inviteLinkText").textContent = `O email com o convite para ${res.email} não foi enviado. Envie-lhe este link, com que escolhe a palavra-passe (funciona durante 7 dias e só uma vez):`;
+  const why = res.inviteError || "";
+  $("inviteLinkError").textContent = why.charAt(0).toUpperCase() + why.slice(1);
+  $("inviteLinkUrl").value = res.inviteUrl;
+  $("inviteLinkDlg").showModal();
+}
+$("inviteLinkCopy").addEventListener("click", () => copyLink($("inviteLinkUrl").value));
 
 $("usersBtn").addEventListener("click", openUsers);
 $("addUserBtn").addEventListener("click", () => openUserForm(null));
@@ -1398,7 +1494,8 @@ setInterval(renderTimer, 500);
 setInterval(() => { if (!document.hidden) refreshStatus(); }, STATUS_INTERVAL);
 setInterval(() => { if (!updating) refreshSnapshot(); }, SNAPSHOT_INTERVAL);
 setInterval(() => { if (!document.hidden) loadRecordings(); }, 60000);
-loadMe()
+if (inviteToken) openInvite();
+else loadMe()
   .then(() => {
     // Reloaded on the settings page: open it again if this user may.
     if (location.hash !== SETTINGS_HASH) return;

@@ -2,10 +2,12 @@ package config
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"net/mail"
 	"strings"
+	"time"
 )
 
 // Role decides what a user can do in the web page.
@@ -44,19 +46,35 @@ type User struct {
 	// user, password reset): until the user picks their own, they can only
 	// change it.
 	MustChangePassword bool `json:"mustChangePassword,omitempty"`
+	// InviteHash is the sha256 (hex) of the token in the invite link sent to
+	// a new user, who has no password until they open it and choose one.
+	// Only the hash is kept, so config.json never holds a usable link.
+	InviteHash string `json:"inviteHash,omitempty"`
+	// InviteExpires is when the invite link stops working (Unix seconds).
+	InviteExpires int64 `json:"inviteExpires,omitempty"`
 }
+
+// InvitePending reports whether the user was invited and hasn't chosen a
+// password yet.
+func (u User) InvitePending() bool { return u.InviteHash != "" && u.PasswordHash == "" }
+
+// InviteDuration is how long an invite link works.
+const InviteDuration = 7 * 24 * time.Hour
 
 // MigratedAdminEmail is the email given to the admin created from the single
 // admin password of earlier versions (see migrateUsers).
 const MigratedAdminEmail = "joao@retorta.com"
 
 var (
-	ErrInvalidEmail = errors.New("email inválido")
-	ErrInvalidRole  = errors.New("perfil inválido")
-	ErrEmailTaken   = errors.New("já existe um utilizador com este email")
-	ErrUserNotFound = errors.New("utilizador não encontrado")
-	ErrLastAdmin    = errors.New("tem de existir pelo menos um administrador")
-	ErrBadLogin     = errors.New("email ou palavra-passe errados")
+	ErrInvalidEmail  = errors.New("email inválido")
+	ErrInvalidRole   = errors.New("perfil inválido")
+	ErrEmailTaken    = errors.New("já existe um utilizador com este email")
+	ErrUserNotFound  = errors.New("utilizador não encontrado")
+	ErrLastAdmin     = errors.New("tem de existir pelo menos um administrador")
+	ErrBadLogin      = errors.New("email ou palavra-passe errados")
+	ErrBadInvite     = errors.New("este convite não é válido ou já foi usado; peça um novo a quem o convidou")
+	ErrNotInvited    = errors.New("este utilizador já escolheu a palavra-passe")
+	ErrInviteExpired = errors.New("este convite expirou; peça um novo a quem o convidou")
 )
 
 // NormalizeEmail trims and lowercases an email and checks its format.
@@ -93,12 +111,27 @@ func validateUsers(users []User) error {
 	return nil
 }
 
-func newUserID() string {
-	b := make([]byte, 8)
+func newUserID() string { return randomHex(8) }
+
+func randomHex(n int) string {
+	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
 		panic(err)
 	}
 	return hex.EncodeToString(b)
+}
+
+func inviteHash(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// newInvite sets a fresh invite on u and returns the token for the link.
+func newInvite(u *User, now time.Time) string {
+	token := randomHex(32)
+	u.InviteHash = inviteHash(token)
+	u.InviteExpires = now.Add(InviteDuration).Unix()
+	return token
 }
 
 // migrateUsers turns the single admin password of earlier versions into an
@@ -171,18 +204,32 @@ func (s *Store) Authenticate(email, password string) (User, error) {
 // AddUser creates a user. mustChange makes them pick a new password at the
 // first login (see User.MustChangePassword).
 func (s *Store) AddUser(email string, role Role, password string, mustChange bool) (User, error) {
-	email, err := NormalizeEmail(email)
-	if err != nil {
-		return User{}, err
-	}
-	if role, err = ParseRole(string(role)); err != nil {
-		return User{}, err
-	}
 	hash, err := HashPassword(password)
 	if err != nil {
 		return User{}, err
 	}
-	u := User{ID: newUserID(), Email: email, Role: role, PasswordHash: hash, MustChangePassword: mustChange}
+	return s.addUser(User{Email: email, Role: role, PasswordHash: hash, MustChangePassword: mustChange})
+}
+
+// InviteUser creates a user without a password, and returns the token of the
+// invite link with which they choose it (see AcceptInvite).
+func (s *Store) InviteUser(email string, role Role) (User, string, error) {
+	u := User{Email: email, Role: role}
+	token := newInvite(&u, time.Now())
+	u, err := s.addUser(u)
+	return u, token, err
+}
+
+func (s *Store) addUser(u User) (User, error) {
+	email, err := NormalizeEmail(u.Email)
+	if err != nil {
+		return User{}, err
+	}
+	role, err := ParseRole(string(u.Role))
+	if err != nil {
+		return User{}, err
+	}
+	u.ID, u.Email, u.Role = newUserID(), email, role
 	return u, s.Edit(func(c *Config) error {
 		if findUser(c.Users, func(x User) bool { return x.Email == email }) >= 0 {
 			return ErrEmailTaken
@@ -248,6 +295,7 @@ func (s *Store) UpdateUser(id string, ch UserChanges, check func(before, after U
 		if hash != "" {
 			after.PasswordHash = hash
 			after.MustChangePassword = ch.MustChangePassword
+			after.InviteHash, after.InviteExpires = "", 0
 		}
 		if check != nil {
 			if err := check(before, after); err != nil {
@@ -262,6 +310,73 @@ func (s *Store) UpdateUser(id string, ch UserChanges, check func(before, after U
 		return nil
 	})
 	return after, err
+}
+
+// Reinvite sends a new invite to a user who hasn't chosen a password yet:
+// the old link stops working. check works as in UpdateUser.
+func (s *Store) Reinvite(id string, check func(User) error) (User, string, error) {
+	var u User
+	var token string
+	err := s.Edit(func(c *Config) error {
+		i := findUser(c.Users, func(u User) bool { return u.ID == id })
+		if i < 0 {
+			return ErrUserNotFound
+		}
+		if check != nil {
+			if err := check(c.Users[i]); err != nil {
+				return err
+			}
+		}
+		if c.Users[i].PasswordHash != "" {
+			return ErrNotInvited
+		}
+		token = newInvite(&c.Users[i], time.Now())
+		u = c.Users[i]
+		return nil
+	})
+	return u, token, err
+}
+
+// InvitedUser returns the user an invite token belongs to, if it still works.
+func (s *Store) InvitedUser(token string) (User, error) {
+	return invited(s.Get().Users, token, time.Now())
+}
+
+func invited(users []User, token string, now time.Time) (User, error) {
+	if token == "" {
+		return User{}, ErrBadInvite
+	}
+	h := inviteHash(token)
+	i := findUser(users, func(u User) bool { return u.InvitePending() && u.InviteHash == h })
+	switch {
+	case i < 0:
+		return User{}, ErrBadInvite
+	case now.Unix() > users[i].InviteExpires:
+		return User{}, ErrInviteExpired
+	}
+	return users[i], nil
+}
+
+// AcceptInvite sets the password of an invited user; the link then stops
+// working.
+func (s *Store) AcceptInvite(token, password string) (User, error) {
+	hash, err := HashPassword(password)
+	if err != nil {
+		return User{}, err
+	}
+	var u User
+	err = s.Edit(func(c *Config) error {
+		found, err := invited(c.Users, token, time.Now())
+		if err != nil {
+			return err
+		}
+		i := findUser(c.Users, func(u User) bool { return u.ID == found.ID })
+		c.Users[i].PasswordHash, c.Users[i].MustChangePassword = hash, false
+		c.Users[i].InviteHash, c.Users[i].InviteExpires = "", 0
+		u = c.Users[i]
+		return nil
+	})
+	return u, err
 }
 
 // DeleteUser removes a user. check works as in UpdateUser.

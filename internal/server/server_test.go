@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"net/http/cookiejar"
@@ -892,5 +893,104 @@ func TestSystemMetrics(t *testing.T) {
 	}
 	if m.CPUs < 1 || m.ProcessSeconds == nil || m.Disk == nil || m.Disk.Total == 0 {
 		t.Errorf("system = %s", body)
+	}
+}
+
+// A user created without a password gets an email with a link to choose it.
+func TestInvite(t *testing.T) {
+	var sent []map[string]any
+	resend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var m map[string]any
+		json.NewDecoder(r.Body).Decode(&m)
+		sent = append(sent, m)
+		w.Write([]byte(`{"id":"1"}`))
+	}))
+	defer resend.Close()
+	old := notify.ResendURL
+	notify.ResendURL = resend.URL
+	defer func() { notify.ResendURL = old }()
+
+	srv, store := newTestServer(t)
+	admin := adminClient(t, srv)
+	_, manager := addUser(t, srv, store, "manager@example.com", config.RoleUserManager)
+
+	// Without email settings the user is still created, and whoever invited
+	// gets the link to send it another way.
+	resp, body := doWith(t, manager, "POST", srv.URL+"/api/users", `{"email":"first@example.com","role":"user"}`)
+	var first inviteDTO
+	json.Unmarshal([]byte(body), &first)
+	if resp.StatusCode != 201 || first.InviteSent || first.InviteError == "" || !strings.HasPrefix(first.InviteURL, srv.URL+"/#convite=") || !first.InvitePending {
+		t.Fatalf("invite without email = %d %s", resp.StatusCode, body)
+	}
+
+	cfg := store.Get()
+	cfg.Notify.ResendAPIKey, cfg.Notify.From, cfg.Notify.SiteURL = "re_key", "Gravador <g@retorta.com>", "https://futsal.retorta.com"
+	if err := store.Update(cfg); err != nil {
+		t.Fatal(err)
+	}
+	resp, body = doWith(t, manager, "POST", srv.URL+"/api/users", `{"email":"New@Example.com","role":"user"}`)
+	var inv inviteDTO
+	json.Unmarshal([]byte(body), &inv)
+	if resp.StatusCode != 201 || !inv.InviteSent || !strings.HasPrefix(inv.InviteURL, "https://futsal.retorta.com/#convite=") {
+		t.Fatalf("invite = %d %s", resp.StatusCode, body)
+	}
+	if len(sent) != 1 || fmt.Sprint(sent[0]["to"]) != "[new@example.com]" || !strings.Contains(sent[0]["text"].(string), inv.InviteURL) {
+		t.Fatalf("email = %v", sent)
+	}
+	token := strings.TrimPrefix(inv.InviteURL, "https://futsal.retorta.com/#convite=")
+	data, _ := os.ReadFile(filepath.Join(store.BaseDir(), "config.json"))
+	if strings.Contains(string(data), token) {
+		t.Fatal("config.json holds the invite token")
+	}
+	// A user manager can't invite more than a plain user.
+	if resp, _ := doWith(t, manager, "POST", srv.URL+"/api/users", `{"email":"boss@example.com","role":"admin"}`); resp.StatusCode != 403 {
+		t.Errorf("manager invites admin = %d, want 403", resp.StatusCode)
+	}
+
+	// Until the invite is accepted there is no password to log in with.
+	if resp, _ := doWith(t, client(), "POST", srv.URL+"/api/login", `{"email":"new@example.com","password":""}`); resp.StatusCode != 401 {
+		t.Errorf("login before accepting = %d, want 401", resp.StatusCode)
+	}
+	if resp, body := do(t, "POST", srv.URL+"/api/invite", `{"token":"`+token+`"}`); resp.StatusCode != 200 || body != `{"email":"new@example.com"}`+"\n" {
+		t.Errorf("check = %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := do(t, "POST", srv.URL+"/api/invite", `{"token":"wrong"}`); resp.StatusCode != 410 {
+		t.Errorf("check wrong token = %d, want 410", resp.StatusCode)
+	}
+	c := client()
+	if resp, _ := doWith(t, c, "POST", srv.URL+"/api/invite/accept", `{"token":"`+token+`","password":"short"}`); resp.StatusCode != 400 {
+		t.Errorf("accept short password = %d, want 400", resp.StatusCode)
+	}
+	if resp, body := doWith(t, c, "POST", srv.URL+"/api/invite/accept", `{"token":"`+token+`","password":"my own pass"}`); resp.StatusCode != 200 || !strings.Contains(body, `"mustChangePassword":false`) {
+		t.Fatalf("accept = %d %s", resp.StatusCode, body)
+	}
+	if resp, _ := doWith(t, c, "GET", srv.URL+"/api/recordings", ""); resp.StatusCode != 200 {
+		t.Errorf("after accepting = %d, want 200 (logged in)", resp.StatusCode)
+	}
+	loginClient(t, srv, "new@example.com", "my own pass")
+	if resp, _ := do(t, "POST", srv.URL+"/api/invite/accept", `{"token":"`+token+`","password":"taken over"}`); resp.StatusCode != 410 {
+		t.Errorf("accept twice = %d, want 410", resp.StatusCode)
+	}
+	if resp, _ := doWith(t, manager, "POST", srv.URL+"/api/users/"+inv.ID+"/invite", ""); resp.StatusCode != 409 {
+		t.Errorf("invite again after accepting = %d, want 409", resp.StatusCode)
+	}
+
+	// Inviting again replaces the link.
+	resp, body = doWith(t, manager, "POST", srv.URL+"/api/users/"+first.ID+"/invite", "")
+	var again inviteDTO
+	json.Unmarshal([]byte(body), &again)
+	if resp.StatusCode != 200 || !again.InviteSent || again.InviteURL == first.InviteURL {
+		t.Fatalf("invite again = %d %s", resp.StatusCode, body)
+	}
+	oldToken := first.InviteURL[strings.Index(first.InviteURL, "=")+1:]
+	if resp, _ := do(t, "POST", srv.URL+"/api/invite", `{"token":"`+oldToken+`"}`); resp.StatusCode != 410 {
+		t.Errorf("old link = %d, want 410", resp.StatusCode)
+	}
+	// A user manager can't invite an admin's pending user manager again.
+	_, body = doWith(t, admin, "POST", srv.URL+"/api/users", `{"email":"mgr2@example.com","role":"userManager"}`)
+	var mgr2 inviteDTO
+	json.Unmarshal([]byte(body), &mgr2)
+	if resp, _ := doWith(t, manager, "POST", srv.URL+"/api/users/"+mgr2.ID+"/invite", ""); resp.StatusCode != 403 {
+		t.Errorf("manager reinvites user manager = %d, want 403", resp.StatusCode)
 	}
 }
