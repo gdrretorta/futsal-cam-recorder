@@ -23,13 +23,16 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          # The newest 1.26 patch, not the exact go.mod version: the release
+          # must carry the standard library's security fixes.
+          go-version: '1.26.x'
+          check-latest: true
 
       - name: Install ffmpeg (used by recorder tests)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
@@ -105,7 +108,7 @@ jobs:
           cat dist/checksums.txt
 
       - name: Publish release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: ${{ steps.version.outputs.version }}
           target_commitish: ${{ steps.changelog.outputs.sha }}

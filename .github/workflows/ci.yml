@@ -5,15 +5,21 @@ on:
     branches: [development]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          # The newest 1.26 patch, not the exact go.mod version: the release
+          # must carry the standard library's security fixes.
+          go-version: '1.26.x'
+          check-latest: true
 
       - name: Install ffmpeg (used by recorder tests)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
@@ -29,15 +35,20 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+      # Known vulnerabilities in the code paths the app uses (stdlib and
+      # golang.org/x/sys). A failure here means: update Go or the module.
+      - name: Vulnerability check
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
       - name: Build Windows executable
         run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o futsal-cam-recorder.exe .
 
       - name: Check web UI syntax
         run: node --check web/app.js
 
-      # The release bundles ffmpeg.exe from BtbN/FFmpeg-Builds; catch a
-      # missing asset here instead of in the middle of a release.
-      - name: Check ffmpeg build is available
+      # The release bundles the pinned ffmpeg.exe (scripts/fetch-ffmpeg.sh);
+      # catch a missing source here instead of in the middle of a release.
+      - name: Check pinned ffmpeg is available
         env:
           GH_TOKEN: ${{ github.token }}
         run: scripts/fetch-ffmpeg.sh --check
