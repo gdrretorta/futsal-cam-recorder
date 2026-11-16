@@ -37,3 +37,34 @@ func TestRecentIsNeverNil(t *testing.T) {
 		t.Fatal("Recent() returned nil")
 	}
 }
+
+func TestRedactURLs(t *testing.T) {
+	in := "Error opening input file rtsp://admin:S3cret!@192.168.1.10:554/cam?channel=1."
+	want := "Error opening input file rtsp://***@192.168.1.10:554/cam?channel=1."
+	if got := RedactURLs(in); got != want {
+		t.Fatalf("RedactURLs = %q, want %q", got, want)
+	}
+	if got := RedactURLs("rtsp://192.168.1.10/x a@b.c"); got != "rtsp://192.168.1.10/x a@b.c" {
+		t.Fatalf("changed a URL without credentials: %q", got)
+	}
+}
+
+func TestOldLogsAreScrubbed(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "recorder.log.1"), []byte("ffmpeg: rtsp://admin:pw@cam/x failed\n"), 0o644)
+	log, err := newLogger(dir, brokenWriter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := &LineWriter{Log: log.Logger, Prefix: "ffmpeg: "}
+	w.Write([]byte("Error opening input file rtsp://admin:pw@cam/x.\n"))
+	for _, name := range []string{"recorder.log", "recorder.log.1"} {
+		data, _ := os.ReadFile(filepath.Join(dir, name))
+		if strings.Contains(string(data), "pw@") {
+			t.Fatalf("%s still holds the password: %q", name, data)
+		}
+	}
+	if strings.Contains(strings.Join(log.Recent(), "\n"), "pw@") || strings.Contains(w.LastLine(), "pw@") {
+		t.Fatal("password reached the in-memory log or LastLine")
+	}
+}

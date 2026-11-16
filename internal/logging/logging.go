@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -31,6 +32,11 @@ func newLogger(dir string, stdout io.Writer) (*Logger, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
+	// Versions up to 2.15 logged ffmpeg's lines as they were, and those can
+	// hold the camera URL with its password: scrub what is already on disk.
+	for _, name := range []string{"recorder.log", "recorder.log.1"} {
+		scrubFile(filepath.Join(dir, name))
+	}
 	file, err := newRotatingFile(filepath.Join(dir, "recorder.log"))
 	if err != nil {
 		return nil, err
@@ -52,6 +58,24 @@ func (ws allWriters) Write(p []byte) (int, error) {
 		w.Write(p)
 	}
 	return len(p), nil
+}
+
+// urlUserinfo matches the credentials of a URL ("rtsp://user:pw@").
+var urlUserinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+@`)
+
+// RedactURLs hides the credentials of every URL in s. ffmpeg prints the
+// camera URL, password included, in its errors.
+func RedactURLs(s string) string { return urlUserinfo.ReplaceAllString(s, "${1}***@") }
+
+// scrubFile redacts the URLs in a log file written by an older version.
+func scrubFile(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	if clean := RedactURLs(string(data)); clean != string(data) {
+		os.WriteFile(path, []byte(clean), 0o644)
+	}
 }
 
 // Discard returns a logger that drops everything (for tests).
@@ -146,7 +170,7 @@ func (w *LineWriter) Write(p []byte) (int, error) {
 			w.buf.WriteString(line)
 			break
 		}
-		if line = strings.TrimSpace(line); line != "" {
+		if line = RedactURLs(strings.TrimSpace(line)); line != "" {
 			w.Log.Warn(w.Prefix + line)
 			w.last = append(w.last, line)
 			if len(w.last) > 5 {
@@ -162,7 +186,7 @@ func (w *LineWriter) LastLine() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if rest := strings.TrimSpace(w.buf.String()); rest != "" {
-		return rest
+		return RedactURLs(rest)
 	}
 	if len(w.last) == 0 {
 		return ""

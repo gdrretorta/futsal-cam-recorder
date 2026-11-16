@@ -738,7 +738,7 @@ func SnapshotURL(ctx context.Context, ffmpeg, url string) ([]byte, error) {
 	if err != nil || len(out) == 0 {
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
 			lines := strings.Split(msg, "\n")
-			return nil, errors.New(strings.TrimSpace(lines[len(lines)-1]))
+			return nil, errors.New(logging.RedactURLs(strings.TrimSpace(lines[len(lines)-1])))
 		}
 		if ctx.Err() != nil {
 			return nil, errors.New("a câmara não respondeu a tempo")
