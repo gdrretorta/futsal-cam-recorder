@@ -8,7 +8,8 @@
 // change it (403 otherwise). /recordings/{name} also works without access
 // when it carries the recording's share key (?k=, from the list), so a
 // recording's link can be shared; a bare name is not enough, because names
-// are dates and easy to guess.
+// are dates and easy to guess. Recordings started before share keys existed
+// still open by their bare name, as links to them were shared that way.
 //
 //	GET    /api/status               recorder, update and disk status; only
 //	                                 {title, version, loginRequired} without access
@@ -348,7 +349,8 @@ func (s *Server) cut(w http.ResponseWriter, r *http.Request) {
 // serveRecording plays a recording for whoever has access, or for anyone with
 // its share link.
 func (s *Server) serveRecording(w http.ResponseWriter, r *http.Request) {
-	if k := r.URL.Query().Get("k"); k != "" && hmac.Equal([]byte(k), []byte(s.auth.shareKey(r.PathValue("name")))) {
+	name := r.PathValue("name")
+	if k := r.URL.Query().Get("k"); s.auth.openByName(name) || (k != "" && hmac.Equal([]byte(k), []byte(s.auth.shareKey(name)))) {
 		s.sendRecording(w, r)
 		return
 	}

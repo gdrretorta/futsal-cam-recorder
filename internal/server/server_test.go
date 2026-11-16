@@ -153,7 +153,7 @@ func TestRecordingsEndpoints(t *testing.T) {
 	srv, store := newTestServer(t)
 	dir := store.RecordingsDir()
 	os.MkdirAll(dir, 0o755)
-	os.WriteFile(filepath.Join(dir, "2026-10-29_150000.mp4"), []byte("video"), 0o644)
+	os.WriteFile(filepath.Join(dir, "2099-10-29_150000.mp4"), []byte("video"), 0o644)
 	os.WriteFile(filepath.Join(store.BaseDir(), "secret.mp4"), []byte("outside"), 0o644)
 	c := adminClient(t, srv)
 	do := func(t *testing.T, method, url, body string) (*http.Response, string) {
@@ -164,7 +164,7 @@ func TestRecordingsEndpoints(t *testing.T) {
 		t.Fatalf("list without login = %d, want 401", resp.StatusCode)
 	}
 	_, body := do(t, "GET", srv.URL+"/api/recordings", "")
-	if !strings.Contains(body, "2026-10-29_150000.mp4") {
+	if !strings.Contains(body, "2099-10-29_150000.mp4") {
 		t.Fatalf("list = %s", body)
 	}
 
@@ -175,7 +175,7 @@ func TestRecordingsEndpoints(t *testing.T) {
 	if len(list) != 1 || len(list[0].Key) != 32 {
 		t.Fatalf("list has no share key: %s", body)
 	}
-	link := srv.URL + "/recordings/2026-10-29_150000.mp4"
+	link := srv.URL + "/recordings/2099-10-29_150000.mp4"
 	if resp, body := doWith(t, client(), "GET", link+"?k="+list[0].Key, ""); resp.StatusCode != 200 || body != "video" {
 		t.Fatalf("shared link = %d %q", resp.StatusCode, body)
 	}
@@ -184,11 +184,17 @@ func TestRecordingsEndpoints(t *testing.T) {
 			t.Fatalf("link %q without login = %d, want 401", q, resp.StatusCode)
 		}
 	}
+	// Recordings from before share keys existed still open by name: links
+	// to them were shared that way.
+	os.WriteFile(filepath.Join(dir, "2020-01-01_120000.mp4"), []byte("old"), 0o644)
+	if resp, body := doWith(t, client(), "GET", srv.URL+"/recordings/2020-01-01_120000.mp4", ""); resp.StatusCode != 200 || body != "old" {
+		t.Fatalf("old link = %d %q, want 200", resp.StatusCode, body)
+	}
 	// A key only opens its own recording.
-	if resp, _ := doWith(t, client(), "GET", srv.URL+"/recordings/2026-10-29_150001.mp4?k="+list[0].Key, ""); resp.StatusCode != 401 {
+	if resp, _ := doWith(t, client(), "GET", srv.URL+"/recordings/2099-10-29_150001.mp4?k="+list[0].Key, ""); resp.StatusCode != 401 {
 		t.Fatalf("key of another recording = %d, want 401", resp.StatusCode)
 	}
-	resp, body := do(t, "GET", srv.URL+"/recordings/2026-10-29_150000.mp4?download=1", "")
+	resp, body := do(t, "GET", srv.URL+"/recordings/2099-10-29_150000.mp4?download=1", "")
 	if resp.StatusCode != 200 || body != "video" || !strings.Contains(resp.Header.Get("Content-Disposition"), "attachment") {
 		t.Fatalf("download = %d %q %v", resp.StatusCode, body, resp.Header)
 	}
@@ -207,7 +213,7 @@ func TestRecordingsEndpoints(t *testing.T) {
 	}
 
 	// Cuts check the range and the file before starting.
-	if resp, _ := do(t, "POST", srv.URL+"/api/recordings/2026-10-29_150000.mp4/cut", `{"from":10,"to":5}`); resp.StatusCode != 400 {
+	if resp, _ := do(t, "POST", srv.URL+"/api/recordings/2099-10-29_150000.mp4/cut", `{"from":10,"to":5}`); resp.StatusCode != 400 {
 		t.Fatalf("cut with end before start = %d, want 400", resp.StatusCode)
 	}
 	if resp, _ := do(t, "POST", srv.URL+"/api/recordings/2026-01-01_000000.mp4/cut", `{"from":0,"to":5}`); resp.StatusCode != 404 {
@@ -215,25 +221,25 @@ func TestRecordingsEndpoints(t *testing.T) {
 	}
 
 	// A protected recording can't be deleted until the mark is removed.
-	if resp, body := do(t, "PUT", srv.URL+"/api/recordings/2026-10-29_150000.mp4/protected", `{"protected":true}`); resp.StatusCode != 200 || body != `{"protected":true}`+"\n" {
+	if resp, body := do(t, "PUT", srv.URL+"/api/recordings/2099-10-29_150000.mp4/protected", `{"protected":true}`); resp.StatusCode != 200 || body != `{"protected":true}`+"\n" {
 		t.Fatalf("protect = %d %s", resp.StatusCode, body)
 	}
 	if _, body := do(t, "GET", srv.URL+"/api/recordings", ""); !strings.Contains(body, `"protected":true`) {
 		t.Fatalf("list after protect = %s", body)
 	}
-	if resp, body := do(t, "DELETE", srv.URL+"/api/recordings/2026-10-29_150000.mp4", ""); resp.StatusCode != 409 || !strings.Contains(body, "protegida") {
+	if resp, body := do(t, "DELETE", srv.URL+"/api/recordings/2099-10-29_150000.mp4", ""); resp.StatusCode != 409 || !strings.Contains(body, "protegida") {
 		t.Fatalf("delete protected = %d %s", resp.StatusCode, body)
 	}
 	if resp, _ := do(t, "PUT", srv.URL+"/api/recordings/2026-01-01_000000.mp4/protected", `{"protected":true}`); resp.StatusCode != 404 {
 		t.Fatalf("protect missing = %d, want 404", resp.StatusCode)
 	}
-	if resp, _ := do(t, "PUT", srv.URL+"/api/recordings/2026-10-29_150000.mp4/protected", `{"protected":false}`); resp.StatusCode != 200 {
+	if resp, _ := do(t, "PUT", srv.URL+"/api/recordings/2099-10-29_150000.mp4/protected", `{"protected":false}`); resp.StatusCode != 200 {
 		t.Fatalf("unprotect = %d", resp.StatusCode)
 	}
-	if resp, _ := do(t, "DELETE", srv.URL+"/api/recordings/2026-10-29_150000.mp4", ""); resp.StatusCode != 204 {
+	if resp, _ := do(t, "DELETE", srv.URL+"/api/recordings/2099-10-29_150000.mp4", ""); resp.StatusCode != 204 {
 		t.Fatalf("delete = %d", resp.StatusCode)
 	}
-	if resp, _ := do(t, "DELETE", srv.URL+"/api/recordings/2026-10-29_150000.mp4", ""); resp.StatusCode != 404 {
+	if resp, _ := do(t, "DELETE", srv.URL+"/api/recordings/2099-10-29_150000.mp4", ""); resp.StatusCode != 404 {
 		t.Fatalf("second delete = %d, want 404", resp.StatusCode)
 	}
 }
@@ -307,7 +313,7 @@ func TestAccessByRole(t *testing.T) {
 		{"GET", "/api/live", [4]int{401, ok, ok, ok}},
 		{"GET", "/api/live/init/1", [4]int{401, ok, ok, ok}},
 		{"GET", "/api/live/seg/1", [4]int{401, ok, ok, ok}},
-		{"GET", "/recordings/2026-01-01_000000.mp4", [4]int{401, ok, ok, ok}},
+		{"GET", "/recordings/2099-01-01_000000.mp4", [4]int{401, ok, ok, ok}},
 		{"GET", "/api/users", [4]int{401, 403, ok, ok}},
 		{"POST", "/api/users", [4]int{401, 403, ok, ok}},
 		{"PUT", "/api/users/x", [4]int{401, 403, ok, ok}},

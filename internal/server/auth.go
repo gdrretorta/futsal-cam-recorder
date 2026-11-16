@@ -26,6 +26,7 @@ const (
 	sessionDuration = 7 * 24 * time.Hour
 	sessionKeyFile  = "session.key"
 	revokedFile     = "sessions.revoked"
+	keyedSinceFile  = "links.keyed-since"
 	maxFailures     = 5 // per IP (an IPv6 /64)
 	// maxAccountFailures locks an account whatever the IP, against guesses
 	// spread over many addresses. Not on the PC itself, so the owner can
@@ -41,6 +42,10 @@ const (
 type auth struct {
 	key         []byte
 	revokedPath string
+	// keyedSince is when this app first required share keys. Recordings
+	// started before keep working by their bare name, because links to them
+	// were shared that way (the owner asked for this).
+	keyedSince time.Time
 
 	mu       sync.Mutex
 	failures map[string]*failure
@@ -55,6 +60,7 @@ type failure struct {
 func newAuth(dir string) (*auth, error) {
 	key, err := loadSessionKey(filepath.Join(dir, sessionKeyFile))
 	a := &auth{key: key, revokedPath: filepath.Join(dir, revokedFile), failures: map[string]*failure{}, revoked: map[string]int64{}}
+	a.keyedSince = loadKeyedSince(filepath.Join(dir, keyedSinceFile))
 	if data, rerr := os.ReadFile(a.revokedPath); rerr == nil {
 		for _, line := range strings.Split(string(data), "\n") {
 			sig, exp, _ := strings.Cut(line, " ")
@@ -133,6 +139,28 @@ func (a *auth) user(r *http.Request, store *config.Store) (config.User, bool) {
 		return config.User{}, false
 	}
 	return u, true
+}
+
+// loadKeyedSince reads the time share keys started, saving now on first use.
+func loadKeyedSince(path string) time.Time {
+	if data, err := os.ReadFile(path); err == nil {
+		if sec, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64); err == nil {
+			return time.Unix(sec, 0)
+		}
+	}
+	now := time.Now()
+	os.WriteFile(path, []byte(strconv.FormatInt(now.Unix(), 10)), 0o600)
+	return now
+}
+
+// openByName reports whether a recording opens without a key: one started
+// before share keys existed (its name is its start time).
+func (a *auth) openByName(name string) bool {
+	if len(name) < 17 {
+		return false
+	}
+	t, err := time.ParseInLocation("2006-01-02_150405", name[:17], time.Local)
+	return err == nil && t.Before(a.keyedSince)
 }
 
 // shareKey signs a recording's share link. Deleting session.key also ends
