@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/gdrretorta/futsal-cam-recorder/internal/config"
 	"github.com/gdrretorta/futsal-cam-recorder/internal/notify"
@@ -16,8 +17,9 @@ type errPermission struct{ msg string }
 func (e errPermission) Error() string { return e.msg }
 
 var (
-	errAdminsOnly = errPermission{"só um administrador pode criar ou alterar administradores e gestores de utilizadores"}
-	errDeleteSelf = errPermission{"não pode apagar a sua própria conta"}
+	errAdminsOnly  = errPermission{"só um administrador pode criar ou alterar administradores e gestores de utilizadores"}
+	errDeleteSelf  = errPermission{"não pode apagar a sua própria conta"}
+	errOwnPassword = errPermission{"para mudar a sua própria palavra-passe use \"A minha conta\""}
 )
 
 // canManage applies the rules of the users page: admins manage everyone, user
@@ -83,6 +85,10 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Password == "" {
 		// No password: the new user gets an email with a link to choose it.
+		if !s.inviteQuota() {
+			writeError(w, http.StatusTooManyRequests, errTooManyInvites)
+			return
+		}
 		u, token, err := s.Store.InviteUser(body.Email, role)
 		if err != nil {
 			writeUserError(w, err)
@@ -147,6 +153,10 @@ func (s *Server) sendInvite(r *http.Request, u config.User, token string, actor 
 // hasn't chosen a password yet.
 func (s *Server) reinvite(w http.ResponseWriter, r *http.Request) {
 	actor, _ := userFrom(r)
+	if !s.inviteQuota() {
+		writeError(w, http.StatusTooManyRequests, errTooManyInvites)
+		return
+	}
 	u, token, err := s.Store.Reinvite(r.PathValue("id"), func(u config.User) error { return canManage(actor, u.Role) })
 	if err != nil {
 		writeUserError(w, err)
@@ -199,10 +209,35 @@ func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) inviteAllowed(w http.ResponseWriter, r *http.Request) bool {
-	if s.auth.locked(clientIP(r)) {
-		writeError(w, http.StatusTooManyRequests, errors.New("demasiadas tentativas falhadas; tente daqui a 15 minutos"))
+	if s.auth.locked(clientIP(r), maxFailures) {
+		writeError(w, http.StatusTooManyRequests, errTooManyFailures)
 		return false
 	}
+	return true
+}
+
+// maxInvitesPerHour limits the invite emails, so a user manager (or a stolen
+// session) can't use the app to send mail to anyone at will.
+const maxInvitesPerHour = 20
+
+var errTooManyInvites = errors.New("foram enviados demasiados convites na última hora; tente mais tarde")
+
+// inviteQuota takes one invite from the hourly allowance.
+func (s *Server) inviteQuota() bool {
+	s.inviteMu.Lock()
+	defer s.inviteMu.Unlock()
+	now := time.Now()
+	recent := s.invites[:0]
+	for _, t := range s.invites {
+		if now.Sub(t) < time.Hour {
+			recent = append(recent, t)
+		}
+	}
+	s.invites = recent
+	if len(recent) >= maxInvitesPerHour {
+		return false
+	}
+	s.invites = append(s.invites, now)
 	return true
 }
 
@@ -226,17 +261,19 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 	if body.Password != nil && *body.Password == "" {
 		body.Password = nil
 	}
-	// A password reset by someone else must be changed at the next login.
 	id := r.PathValue("id")
+	if id == actor.ID && body.Password != nil {
+		// Changing your own password asks for the current one (/api/me/password).
+		writeUserError(w, errOwnPassword)
+		return
+	}
+	// A password reset by someone else must be changed at the next login.
 	ch := config.UserChanges{Email: body.Email, Role: body.Role, Password: body.Password, MustChangePassword: id != actor.ID}
 	u, err := s.Store.UpdateUser(id, ch,
 		func(before, after config.User) error { return canManage(actor, before.Role, after.Role) })
 	if err != nil {
 		writeUserError(w, err)
 		return
-	}
-	if u.ID == actor.ID && body.Password != nil {
-		s.auth.setSession(w, r, u) // keep the editor logged in
 	}
 	s.Log.Info("user updated", "email", u.Email, "role", u.Role, "password", body.Password != nil, "by", actor.Email)
 	writeJSON(w, http.StatusOK, toUserDTO(u))

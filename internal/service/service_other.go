@@ -14,8 +14,9 @@ var errUnsupported = errors.New("o serviço só está disponível em Windows")
 // RunFunc runs the app until ctx is cancelled; true means restart.
 type RunFunc func(ctx context.Context) (restart bool, err error)
 
-func IsService() bool                 { return false }
-func Run(string, RunFunc) error       { return errUnsupported }
-func Install(_, _, _, _ string) error { return errUnsupported }
-func Uninstall(string) error          { return errUnsupported }
-func SetExe(_, _, _ string) error     { return errUnsupported }
+func IsService() bool                   { return false }
+func Run(string, RunFunc) error         { return errUnsupported }
+func Install(_, _, _, _ string) error   { return errUnsupported }
+func Uninstall(string) error            { return errUnsupported }
+func SetExe(_, _, _ string) error       { return errUnsupported }
+func LockDir(_, _ string) (bool, error) { return false, nil }

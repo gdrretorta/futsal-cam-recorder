@@ -14,7 +14,7 @@ import (
 
 const (
 	pbkdf2Iterations = 210_000
-	minPasswordLen   = 8
+	minPasswordLen   = 10
 )
 
 // ErrWeakPassword is returned for passwords that are too short.

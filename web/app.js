@@ -505,7 +505,8 @@ function iconButton(icon, title, onClick, extraClass = "") {
 function renderRecording(rec) {
   const li = document.createElement("li");
   li.className = "rec-item";
-  const url = `/recordings/${encodeURIComponent(rec.name)}`;
+  // The key makes it a link that works without logging in (shareable).
+  const url = `/recordings/${encodeURIComponent(rec.name)}?k=${encodeURIComponent(rec.key)}`;
 
   const info = document.createElement("div");
   info.className = "rec-info";
@@ -531,7 +532,7 @@ function renderRecording(rec) {
   actions.className = "rec-actions";
   const play = iconButton("play", "Ver", () => openPlayer(rec, url));
   const link = iconButton("link", "Copiar link", () => copyLink(new URL(url, location.href).href));
-  const dl = iconButton("download", "Descarregar", () => { location.href = url + "?download=1"; });
+  const dl = iconButton("download", "Descarregar", () => { location.href = url + "&download=1"; });
   const keep = iconButton("star", rec.protected ? "Protegida: não é apagada (tirar estrela)" : "Não apagar (proteger da limpeza automática)",
     () => setProtected(rec, !rec.protected), rec.protected ? "keep on" : "keep");
   keep.setAttribute("aria-pressed", rec.protected ? "true" : "false");
@@ -1252,7 +1253,8 @@ function openUserForm(u) {
   userForm.elements.email.value = u ? u.email : "";
   // A new user gets an email with a link to choose their own password.
   const self = u && u.id === me.user.id;
-  $("userPasswordField").hidden = !u;
+  // Your own password is changed in "A minha conta", with the current one.
+  $("userPasswordField").hidden = !u || self;
   userForm.elements.password.placeholder = "Deixe vazio para manter";
   $("userPasswordLabel").textContent = "Nova palavra-passe";
   $("userPasswordHint").textContent = u
@@ -1270,7 +1272,7 @@ userForm.addEventListener("submit", async (ev) => {
     email: userForm.elements.email.value.trim(),
     role: userForm.elements.role.value,
   };
-  if (editingUser) body.password = userForm.elements.password.value;
+  if (editingUser && editingUser.id !== me.user.id) body.password = userForm.elements.password.value;
   try {
     if (editingUser) {
       await api("PUT", `/api/users/${encodeURIComponent(editingUser.id)}`, body);

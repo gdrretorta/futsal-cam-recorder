@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -24,8 +25,13 @@ const (
 	sessionCookie   = "srr_session"
 	sessionDuration = 7 * 24 * time.Hour
 	sessionKeyFile  = "session.key"
-	maxFailures     = 5
-	lockoutDuration = 15 * time.Minute
+	revokedFile     = "sessions.revoked"
+	maxFailures     = 5 // per IP (an IPv6 /64)
+	// maxAccountFailures locks an account whatever the IP, against guesses
+	// spread over many addresses. Not on the PC itself, so the owner can
+	// always log in there.
+	maxAccountFailures = 10
+	lockoutDuration    = 15 * time.Minute
 )
 
 // auth issues and checks user sessions. A session is a cookie
@@ -33,10 +39,12 @@ const (
 // sessions survive restarts and updates. The signature also covers the user's
 // password hash: changing a password logs that user out everywhere else.
 type auth struct {
-	key []byte
+	key         []byte
+	revokedPath string
 
 	mu       sync.Mutex
 	failures map[string]*failure
+	revoked  map[string]int64 // signature of a logged-out session → its expiry
 }
 
 type failure struct {
@@ -46,7 +54,41 @@ type failure struct {
 
 func newAuth(dir string) (*auth, error) {
 	key, err := loadSessionKey(filepath.Join(dir, sessionKeyFile))
-	return &auth{key: key, failures: map[string]*failure{}}, err
+	a := &auth{key: key, revokedPath: filepath.Join(dir, revokedFile), failures: map[string]*failure{}, revoked: map[string]int64{}}
+	if data, rerr := os.ReadFile(a.revokedPath); rerr == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			sig, exp, _ := strings.Cut(line, " ")
+			if e, perr := strconv.ParseInt(exp, 10, 64); perr == nil {
+				a.revoked[sig] = e
+			}
+		}
+	}
+	return a, err
+}
+
+// revoke ends a session for good (logout): the cookie may have been copied.
+// Revoked sessions are kept in sessions.revoked until they would expire.
+func (a *auth) revoke(sig string, expiry int64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	now := time.Now().Unix()
+	a.revoked[sig] = expiry
+	var b strings.Builder
+	for s, e := range a.revoked {
+		if e < now {
+			delete(a.revoked, s)
+			continue
+		}
+		fmt.Fprintf(&b, "%s %d\n", s, e)
+	}
+	os.WriteFile(a.revokedPath, []byte(b.String()), 0o600)
+}
+
+func (a *auth) isRevoked(sig string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	_, ok := a.revoked[sig]
+	return ok
 }
 
 // loadSessionKey reads the signing key, creating it on first use. If it can't
@@ -87,14 +129,27 @@ func (a *auth) user(r *http.Request, store *config.Store) (config.User, bool) {
 		return config.User{}, false
 	}
 	u, ok := store.UserByID(parts[0])
-	if !ok || u.PasswordHash == "" || !hmac.Equal([]byte(parts[2]), []byte(a.sign(u.ID, expiry, u.PasswordHash))) {
+	if !ok || u.PasswordHash == "" || !hmac.Equal([]byte(parts[2]), []byte(a.sign(u.ID, expiry, u.PasswordHash))) || a.isRevoked(parts[2]) {
 		return config.User{}, false
 	}
 	return u, true
 }
 
+// shareKey signs a recording's share link. Deleting session.key also ends
+// every shared link.
+func (a *auth) shareKey(name string) string {
+	m := hmac.New(sha256.New, a.key)
+	m.Write([]byte("recording|" + name))
+	return hex.EncodeToString(m.Sum(nil))[:32]
+}
+
 func (a *auth) setSession(w http.ResponseWriter, r *http.Request, u config.User) {
 	expiry := time.Now().Add(sessionDuration).Unix()
+	// Logging out and in again within a second would give the revoked
+	// signature back.
+	for a.isRevoked(a.sign(u.ID, expiry, u.PasswordHash)) {
+		expiry++
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    u.ID + "." + strconv.FormatInt(expiry, 10) + "." + a.sign(u.ID, expiry, u.PasswordHash),
@@ -131,35 +186,61 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-// locked reports whether an IP has too many recent failed logins.
-func (a *auth) locked(ip string) bool {
+// lockKey is what the lockout counts failures by: the IP, but a whole IPv6
+// /64 (one home or phone gets a whole /64, so one IP each is easy to rotate).
+func lockKey(ip string) string {
+	if p := net.ParseIP(ip); p != nil && p.To4() == nil {
+		return p.Mask(net.CIDRMask(64, 128)).String() + "/64"
+	}
+	return ip
+}
+
+// accountKey is the lockout key of an account.
+func accountKey(email string) string { return "account:" + strings.ToLower(strings.TrimSpace(email)) }
+
+// locked reports whether an IP (or with max = maxAccountFailures, an
+// account key) has too many recent failures.
+func (a *auth) locked(key string, max int) bool {
+	key = lockKey(key)
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	f := a.failures[ip]
+	f := a.failures[key]
 	if f == nil {
 		return false
 	}
 	if time.Since(f.first) > lockoutDuration {
-		delete(a.failures, ip)
+		delete(a.failures, key)
 		return false
 	}
-	return f.count >= maxFailures
+	return f.count >= max
 }
 
-func (a *auth) fail(ip string) {
+func (a *auth) fail(keys ...string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	f := a.failures[ip]
-	if f == nil || time.Since(f.first) > lockoutDuration {
-		f = &failure{first: time.Now()}
-		a.failures[ip] = f
+	if len(a.failures) > 10000 { // many random emails: drop what has expired
+		for k, f := range a.failures {
+			if time.Since(f.first) > lockoutDuration {
+				delete(a.failures, k)
+			}
+		}
 	}
-	f.count++
+	for _, key := range keys {
+		key = lockKey(key)
+		f := a.failures[key]
+		if f == nil || time.Since(f.first) > lockoutDuration {
+			f = &failure{first: time.Now()}
+			a.failures[key] = f
+		}
+		f.count++
+	}
 }
 
-func (a *auth) succeed(ip string) {
+func (a *auth) succeed(keys ...string) {
 	a.mu.Lock()
-	delete(a.failures, ip)
+	for _, key := range keys {
+		delete(a.failures, lockKey(key))
+	}
 	a.mu.Unlock()
 }
 
@@ -167,6 +248,7 @@ var (
 	errLoginRequired      = errors.New("é preciso iniciar sessão")
 	errForbidden          = errors.New("não tem permissão para isto")
 	errMustChangePassword = errors.New("tem de mudar a palavra-passe antes de continuar")
+	errTooManyFailures    = errors.New("demasiadas tentativas falhadas; tente daqui a 15 minutos")
 )
 
 // access is what an endpoint needs.
@@ -316,8 +398,8 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
-	if s.auth.locked(ip) {
-		writeError(w, http.StatusTooManyRequests, errors.New("demasiadas tentativas falhadas; tente daqui a 15 minutos"))
+	if s.auth.locked(ip, maxFailures) {
+		writeError(w, http.StatusTooManyRequests, errTooManyFailures)
 		return
 	}
 	var body struct {
@@ -327,18 +409,23 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &body) {
 		return
 	}
+	account := accountKey(body.Email)
+	if s.auth.locked(account, maxAccountFailures) && !(s.TrustLocal && isLocal(r)) {
+		writeError(w, http.StatusTooManyRequests, errTooManyFailures)
+		return
+	}
 	if !s.Store.HasUsers() {
 		writeError(w, http.StatusForbidden, errors.New("ainda não existe nenhum utilizador; crie um administrador no PC com: futsal-cam-recorder.exe add-user <email> admin"))
 		return
 	}
 	u, err := s.Store.Authenticate(body.Email, body.Password)
 	if err != nil {
-		s.auth.fail(ip)
+		s.auth.fail(ip, account)
 		s.Log.Warn("login failed", "email", body.Email, "ip", ip)
 		writeError(w, http.StatusUnauthorized, err)
 		return
 	}
-	s.auth.succeed(ip)
+	s.auth.succeed(ip, account)
 	s.auth.setSession(w, r, u)
 	s.Log.Info("logged in", "email", u.Email, "role", u.Role, "ip", ip)
 	d := toUserDTO(u)
@@ -346,6 +433,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.auth.user(r, s.Store); ok {
+		c, _ := r.Cookie(sessionCookie)
+		parts := strings.Split(c.Value, ".")
+		expiry, _ := strconv.ParseInt(parts[1], 10, 64)
+		s.auth.revoke(parts[2], expiry)
+	}
 	clearSession(w, r)
 	w.WriteHeader(http.StatusNoContent)
 }

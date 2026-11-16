@@ -44,10 +44,10 @@ func TestUsersCRUD(t *testing.T) {
 	if s.HasUsers() {
 		t.Fatal("new install has users")
 	}
-	if _, err := s.AddUser("u@x.pt", RoleUser, "password1", false); err == nil {
+	if _, err := s.AddUser("u@x.pt", RoleUser, "password12", false); err == nil {
 		t.Fatal("first user must be an admin")
 	}
-	admin, err := s.AddUser("Admin@X.pt", RoleAdmin, "password1", false)
+	admin, err := s.AddUser("Admin@X.pt", RoleAdmin, "password12", false)
 	if err != nil || admin.Email != "admin@x.pt" {
 		t.Fatalf("add admin = %+v %v", admin, err)
 	}
@@ -56,17 +56,17 @@ func TestUsersCRUD(t *testing.T) {
 		role      Role
 		want      error
 	}{
-		{"admin@x.pt", "password1", RoleUser, ErrEmailTaken},
-		{"not an email", "password1", RoleUser, ErrInvalidEmail},
-		{"Name <n@x.pt>", "password1", RoleUser, ErrInvalidEmail},
+		{"admin@x.pt", "password12", RoleUser, ErrEmailTaken},
+		{"not an email", "password12", RoleUser, ErrInvalidEmail},
+		{"Name <n@x.pt>", "password12", RoleUser, ErrInvalidEmail},
 		{"n@x.pt", "short", RoleUser, ErrWeakPassword},
-		{"n@x.pt", "password1", "boss", ErrInvalidRole},
+		{"n@x.pt", "password12", "boss", ErrInvalidRole},
 	} {
 		if _, err := s.AddUser(c.email, c.role, c.pw, false); !errors.Is(err, c.want) {
 			t.Errorf("AddUser(%q, %q) = %v, want %v", c.email, c.role, err, c.want)
 		}
 	}
-	user, err := s.AddUser("u@x.pt", RoleUser, "password1", false)
+	user, err := s.AddUser("u@x.pt", RoleUser, "password12", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,10 +97,10 @@ func TestUsersCRUD(t *testing.T) {
 	if _, err := s.Authenticate("u2@x.pt", "new password"); err != nil {
 		t.Errorf("login after change: %v", err)
 	}
-	if _, err := s.Authenticate("u2@x.pt", "password1"); !errors.Is(err, ErrBadLogin) {
+	if _, err := s.Authenticate("u2@x.pt", "password12"); !errors.Is(err, ErrBadLogin) {
 		t.Errorf("old password still works: %v", err)
 	}
-	if _, err := s.Authenticate("nobody@x.pt", "password1"); !errors.Is(err, ErrBadLogin) {
+	if _, err := s.Authenticate("nobody@x.pt", "password12"); !errors.Is(err, ErrBadLogin) {
 		t.Errorf("unknown email: %v", err)
 	}
 	if err := s.DeleteUser(user.ID, nil); err != nil {
@@ -116,22 +116,22 @@ func TestUsersCRUD(t *testing.T) {
 
 func TestSetUserAndAdminPassword(t *testing.T) {
 	s, _ := Open(t.TempDir())
-	if err := s.SetAdminPassword("password1"); err == nil || !strings.Contains(err.Error(), "add-user") {
+	if err := s.SetAdminPassword("password12"); err == nil || !strings.Contains(err.Error(), "add-user") {
 		t.Fatalf("no admin yet: %v", err)
 	}
-	if _, err := s.SetUser("a@x.pt", RoleAdmin, "password1"); err != nil {
+	if _, err := s.SetUser("a@x.pt", RoleAdmin, "password12"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetUser("A@x.pt", RoleAdmin, "password2"); err != nil {
+	if _, err := s.SetUser("A@x.pt", RoleAdmin, "password23"); err != nil {
 		t.Fatal(err)
 	}
 	if len(s.Get().Users) != 1 {
 		t.Fatal("SetUser duplicated the user")
 	}
-	if err := s.SetAdminPassword("password3"); err != nil {
+	if err := s.SetAdminPassword("password34"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Authenticate("a@x.pt", "password3"); err != nil {
+	if _, err := s.Authenticate("a@x.pt", "password34"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -139,7 +139,7 @@ func TestSetUserAndAdminPassword(t *testing.T) {
 // Get hands out copies: changing one must not change the store.
 func TestGetCopiesUsers(t *testing.T) {
 	s, _ := Open(t.TempDir())
-	s.AddUser("a@x.pt", RoleAdmin, "password1", false)
+	s.AddUser("a@x.pt", RoleAdmin, "password12", false)
 	cfg := s.Get()
 	cfg.Users[0].Role = RoleUser
 	if s.Get().Users[0].Role != RoleAdmin {
@@ -152,7 +152,7 @@ func TestInviteExpires(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AddUser("admin@example.com", RoleAdmin, "password1", false); err != nil {
+	if _, err := s.AddUser("admin@example.com", RoleAdmin, "password12", false); err != nil {
 		t.Fatal(err)
 	}
 	u, token, err := s.InviteUser("new@example.com", RoleUser)
@@ -163,7 +163,7 @@ func TestInviteExpires(t *testing.T) {
 		t.Fatalf("after expiry = %v", err)
 	}
 	// Setting a password some other way (add-user on the PC) ends the invite.
-	if _, err := s.SetUser("new@example.com", RoleUser, "password2"); err != nil {
+	if _, err := s.SetUser("new@example.com", RoleUser, "password23"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.InvitedUser(token); err != ErrBadInvite {

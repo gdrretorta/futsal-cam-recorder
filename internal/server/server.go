@@ -5,19 +5,22 @@
 // a [user] without logging in (see isLocal); logging in still works there. While no user exists, [user] endpoints are open to
 // everyone (see accessRecorder). A user whose password was chosen by someone
 // else can only use /api/me, /api/me/password and /api/logout until they
-// change it (403 otherwise). /recordings/{name} is always public, so a
-// recording's link can be shared.
+// change it (403 otherwise). /recordings/{name} also works without access
+// when it carries the recording's share key (?k=, from the list), so a
+// recording's link can be shared; a bare name is not enough, because names
+// are dates and easy to guess.
 //
 //	GET    /api/status               recorder, update and disk status; only
 //	                                 {title, version, loginRequired} without access
 //	POST   /api/recording/start      start recording                          [user]
 //	POST   /api/recording/stop       stop recording                           [user]
-//	GET    /api/recordings           list recordings                          [user]
+//	GET    /api/recordings           list recordings, each with its share key [user]
 //	DELETE /api/recordings/{name}    delete a recording (409 if protected)    [user]
 //	PUT    /api/recordings/{name}/protected {protected} "não apagar" mark     [user]
 //	POST   /api/recordings/{name}/cut {from, to, replace} save an excerpt (seconds;
 //	                                 runs in the background) → 202 {name}     [user]
-//	GET    /recordings/{name}        play (range requests) or ?download=1     public
+//	GET    /recordings/{name}        play (range requests) or ?download=1     [user]
+//	                                 or public with ?k=<share key>
 //	GET    /api/snapshot             JPEG frame from the camera (cached)      [user]
 //	GET    /api/live?viewer=<id>     live view, HLS playlist; at most         [user]
 //	                                 recorder.LiveMaxViewers pages at once
@@ -51,6 +54,7 @@ package server
 
 import (
 	"context"
+	"crypto/hmac"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -90,6 +94,13 @@ type Server struct {
 	auth *auth
 
 	sys sysinfo.Sampler
+
+	probeMu    sync.Mutex // TunnelOrigin
+	probeNonce string
+	probeSeen  chan bool
+
+	inviteMu sync.Mutex
+	invites  []time.Time // invite emails of the last hour (inviteQuota)
 
 	snapMu   sync.Mutex
 	snapAt   time.Time
@@ -140,7 +151,25 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/tunnel", admin(s.tunnelStatus))
 	mux.HandleFunc("POST /api/tunnel/update", admin(s.tunnelUpdate))
 	mux.Handle("GET /", newStaticHandler(s.Static))
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		for k, v := range securityHeaders {
+			h.Set(k, v)
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+// securityHeaders go on every answer: the page may only load its own files
+// (blob: is hls.js's player and the snapshot), and no other site may show it
+// in a frame (clickjacking, mainly on the PC, where no login is needed).
+var securityHeaders = map[string]string{
+	"Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; " +
+		"media-src 'self' blob:; worker-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; " +
+		"form-action 'self'; frame-ancestors 'none'",
+	"X-Frame-Options":        "DENY",
+	"X-Content-Type-Options": "nosniff",
+	"Referrer-Policy":        "same-origin",
 }
 
 type disk struct {
@@ -152,6 +181,7 @@ type disk struct {
 // new version and reloads (an error would only show "Sem ligação"). Without
 // access it reveals nothing but the title and version.
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
+	s.noteProbe(r)
 	cfg := s.Store.Get()
 	if u, ok := s.currentUser(r); (!ok || u.MustChangePassword) && len(cfg.Users) > 0 {
 		writeJSON(w, http.StatusOK, map[string]any{"title": cfg.Title, "version": s.Version, "loginRequired": true})
@@ -199,13 +229,23 @@ func (s *Server) stop(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, s.Recorder.Status())
 }
 
+// recordingDTO is a recording with the key of its share link.
+type recordingDTO struct {
+	recorder.Recording
+	Key string `json:"key"`
+}
+
 func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	list, err := s.Recorder.List()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, list)
+	out := make([]recordingDTO, len(list))
+	for i, rec := range list {
+		out[i] = recordingDTO{rec, s.auth.shareKey(rec.Name)}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // recordingPath validates the {name} parameter and resolves it.
@@ -305,7 +345,17 @@ func (s *Server) cut(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"name": name})
 }
 
+// serveRecording plays a recording for whoever has access, or for anyone with
+// its share link.
 func (s *Server) serveRecording(w http.ResponseWriter, r *http.Request) {
+	if k := r.URL.Query().Get("k"); k != "" && hmac.Equal([]byte(k), []byte(s.auth.shareKey(r.PathValue("name")))) {
+		s.sendRecording(w, r)
+		return
+	}
+	s.require(accessRecorder, s.sendRecording)(w, r)
+}
+
+func (s *Server) sendRecording(w http.ResponseWriter, r *http.Request) {
 	path, ok := s.recordingPath(w, r)
 	if !ok {
 		return

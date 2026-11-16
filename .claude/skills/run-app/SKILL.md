@@ -37,7 +37,7 @@ echo 'test-admin-pw' | /tmp/srr -dir $D add-user admin@example.com admin
 curl -s -c /tmp/cj -XPOST localhost:8080/api/login -d '{"email":"admin@example.com","password":"test-admin-pw"}'
 ```
 
-Then pass `-b /tmp/cj` to every API call (once a user exists, all of them need a login except `/recordings/{name}`).
+Then pass `-b /tmp/cj` to every API call (once a user exists, all of them need a login; `/recordings/{name}` also opens with the `key` from `/api/recordings` as `?k=`). A browser at localhost is a plain user without login; to see the login page, send `Cf-Connecting-Ip` (Playwright: `extraHTTPHeaders`). With `notify.siteUrl` at `http://localhost:8080`, the app switches to listening on localhost only a minute after it starts.
 
 ## 3. Drive it
 

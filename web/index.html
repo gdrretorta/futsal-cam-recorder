@@ -59,8 +59,8 @@
       <h2>Escolha a sua palavra-passe</h2>
       <p class="muted">A palavra-passe com que entrou foi definida por outra pessoa. Escolha uma nova para continuar.</p>
       <label id="tempPasswordLabel">Palavra-passe atual<input name="currentPassword" type="password" autocomplete="current-password"></label>
-      <label>Nova palavra-passe (mínimo 8 caracteres)<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
-      <label>Repita a nova palavra-passe<input name="confirm" type="password" autocomplete="new-password" minlength="8" required></label>
+      <label>Nova palavra-passe (mínimo 10 caracteres)<input name="password" type="password" autocomplete="new-password" minlength="10" required></label>
+      <label>Repita a nova palavra-passe<input name="confirm" type="password" autocomplete="new-password" minlength="10" required></label>
       <p id="passwordError" class="state-error" hidden></p>
       <button type="submit" class="btn primary">Guardar e continuar</button>
       <button type="button" id="passwordLogoutBtn" class="link-btn">Terminar sessão</button>
@@ -72,8 +72,8 @@
       <h2>Bem-vindo</h2>
       <p id="inviteText" class="muted"></p>
       <input name="email" type="email" autocomplete="username" hidden>
-      <label>Palavra-passe (mínimo 8 caracteres)<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
-      <label>Repita a palavra-passe<input name="confirm" type="password" autocomplete="new-password" minlength="8" required></label>
+      <label>Palavra-passe (mínimo 10 caracteres)<input name="password" type="password" autocomplete="new-password" minlength="10" required></label>
+      <label>Repita a palavra-passe<input name="confirm" type="password" autocomplete="new-password" minlength="10" required></label>
       <p id="inviteError" class="state-error" hidden></p>
       <button type="submit" class="btn primary">Guardar e entrar</button>
       <button type="button" id="inviteLoginBtn" class="link-btn">Ir para o início de sessão</button>
@@ -301,7 +301,7 @@
       <fieldset>
         <legend>Mudar palavra-passe</legend>
         <label>Palavra-passe atual<input name="currentPassword" type="password" autocomplete="current-password" required></label>
-        <label>Nova palavra-passe (mínimo 8 caracteres)<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+        <label>Nova palavra-passe (mínimo 10 caracteres)<input name="password" type="password" autocomplete="new-password" minlength="10" required></label>
       </fieldset>
       <p id="accountError" class="state-error" hidden></p>
       <div class="dlg-actions spread">
@@ -336,7 +336,7 @@
       <fieldset>
         <label>Email<input name="email" type="email" autocomplete="off" required></label>
         <label>Perfil<select name="role"></select></label>
-        <label id="userPasswordField"><span id="userPasswordLabel"></span><input name="password" type="password" autocomplete="new-password" minlength="8"></label>
+        <label id="userPasswordField"><span id="userPasswordLabel"></span><input name="password" type="password" autocomplete="new-password" minlength="10"></label>
         <p id="userPasswordHint" class="muted hint"></p>
       </fieldset>
       <p id="userError" class="state-error" hidden></p>

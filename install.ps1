@@ -88,10 +88,10 @@ try {
             Write-Host '    Email inválido.' -ForegroundColor Yellow
         }
         while ($true) {
-            $first = Read-SecretText 'Palavra-passe (mínimo 8 caracteres)'
+            $first = Read-SecretText 'Palavra-passe (mínimo 10 caracteres)'
             $second = Read-SecretText 'Repita a palavra-passe'
             if ($first -ne $second) { Write-Host '    As palavras-passe não coincidem.' -ForegroundColor Yellow; continue }
-            if ($first.Length -lt 8) { Write-Host '    Tem de ter pelo menos 8 caracteres.' -ForegroundColor Yellow; continue }
+            if ($first.Length -lt 10) { Write-Host '    Tem de ter pelo menos 10 caracteres.' -ForegroundColor Yellow; continue }
             break
         }
         # Passed on stdin (UTF-8) so it never shows up in the process list.

@@ -129,6 +129,9 @@ func run(ctx context.Context, exe, baseDir string, asService bool) (restart bool
 	if asService && renameExe(exe, log) {
 		return true, nil
 	}
+	if asService {
+		lockInstallDir(baseDir, store.RecordingsDir(), log)
+	}
 
 	rec := recorder.New(ffmpeg, func() (string, string) {
 		return store.Get().Camera.StreamURL(), store.RecordingsDir()
@@ -157,17 +160,27 @@ func run(ctx context.Context, exe, baseDir string, asService bool) (restart bool
 
 	srv := &server.Server{Version: version, FFmpeg: ffmpeg, Store: store, Recorder: rec, Updater: upd, Tunnel: tun, Log: log, Static: web.FS, TrustLocal: true}
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
-	ln, err := net.Listen("tcp", net.JoinHostPort("", strconv.Itoa(cfg.Port)))
+	port := strconv.Itoa(cfg.Port)
+	ln, err := net.Listen("tcp", net.JoinHostPort("", port))
 	if err != nil {
 		log.Error("listen", "err", err)
 		return false, err
 	}
-	serveErr := make(chan error, 1)
-	go func() { serveErr <- httpSrv.Serve(ln) }()
+	serveErr := make(chan error, 4)
+	serve := func(ln net.Listener) {
+		go func() {
+			// A listener closed on purpose (localOnly) is not an error.
+			if err := httpSrv.Serve(ln); !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {
+				serveErr <- err
+			}
+		}()
+	}
+	serve(ln)
 	log.Info("web interface ready", "url", fmt.Sprintf("http://localhost:%d", cfg.Port))
 
 	bgCtx, cancelBg := context.WithCancel(ctx)
 	defer cancelBg()
+	go localOnly(bgCtx, srv, ln, port, serve, log)
 	go upd.Run(bgCtx)
 	go retention(bgCtx, rec, store)
 	alerts := &notify.Watcher{
@@ -226,6 +239,81 @@ func renameExe(exe string, log *logging.Logger) (restart bool) {
 	}
 	updater.CleanupLegacy(exe)
 	return false
+}
+
+// lockInstallDir keeps the install folder to SYSTEM and the Administrators
+// (see service.LockDir). A failure only logs: the app runs as before.
+func lockInstallDir(baseDir, recordings string, log *logging.Logger) {
+	if filepath.Dir(baseDir) == baseDir {
+		log.Warn("the app runs from a drive's root folder: not restricting it", "dir", baseDir)
+		return
+	}
+	keepOpen := recordings
+	if rel, err := filepath.Rel(baseDir, recordings); err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		keepOpen = "" // not inside the install folder: untouched
+	}
+	changed, err := service.LockDir(baseDir, keepOpen)
+	switch {
+	case err != nil:
+		log.Warn("could not restrict the install folder to administrators", "err", err)
+	case changed:
+		log.Info("install folder restricted to administrators and SYSTEM", "dir", baseDir, "recordings", keepOpen)
+	}
+}
+
+// localOnly stops listening on the network (plain HTTP, readable on the LAN)
+// once the public site is shown to reach this app from loopback, i.e.
+// cloudflared on this PC points at localhost. Until that is proven (tunnel
+// down, no site address, cloudflared pointing at the PC's LAN address),
+// nothing changes, and if the site stops answering after the switch, the
+// network listener comes back: this must never cut the owner off.
+func localOnly(ctx context.Context, srv *server.Server, all net.Listener, port string, serve func(net.Listener), log *logging.Logger) {
+	wait := time.Minute
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		wait = time.Hour
+		loopback, err := srv.TunnelOrigin(ctx)
+		if err != nil {
+			continue // tunnel down or not set up: try again later
+		}
+		if !loopback {
+			log.Info("the tunnel reaches this app over the network: still listening on all addresses")
+			return
+		}
+		all.Close()
+		var local []net.Listener
+		for _, host := range []string{"127.0.0.1", "::1"} {
+			if ln, err := net.Listen("tcp", net.JoinHostPort(host, port)); err == nil {
+				serve(ln)
+				local = append(local, ln)
+			}
+		}
+		if len(local) > 0 {
+			if _, err = srv.TunnelOrigin(ctx); err == nil {
+				log.Info("listening on this PC only (the tunnel reaches it through localhost)")
+				return
+			}
+			for _, ln := range local {
+				ln.Close()
+			}
+		}
+		log.Warn("the public site stopped answering on localhost only: listening on all addresses again", "err", err)
+		for {
+			if all, err = net.Listen("tcp", net.JoinHostPort("", port)); err == nil {
+				serve(all)
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
+		}
+	}
 }
 
 // emailAdmins sends a message to the admins, when emails are configured.
