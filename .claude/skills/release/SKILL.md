@@ -25,7 +25,7 @@ The workflow generates the new section with [git-cliff](https://git-cliff.org) (
 
 ## If the release fails
 
-- **"Bundle ffmpeg" step**: `scripts/fetch-ffmpeg.sh` finds the newest `ffmpeg-n*-latest-win64-lgpl-*.zip` (falling back to `master`) in the BtbN/FFmpeg-Builds `latest` release, and its error message lists the assets it saw. If BtbN renamed its assets, adjust the regex. The CI step "Check ffmpeg build is available" runs the same lookup on every push.
+- **"Bundle ffmpeg" step**: `scripts/fetch-ffmpeg.sh` takes ffmpeg.exe from the zip of our own release `FFMPEG_RELEASE` and checks it against `FFMPEG_SHA256`. A hash mismatch means that asset changed: stop and find out why, never just update the hash. To move to a newer ffmpeg on purpose, follow the script's header. The CI step "Check pinned ffmpeg is available" checks the source on every push.
 - A failed run publishes nothing (no tag, no release), so it is safe to re-run after fixing.
 - **Tests**: fix them on a branch first. Never publish with failing tests: a broken binary would auto-install on the PC.
 
